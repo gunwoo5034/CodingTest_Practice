@@ -1,0 +1,110 @@
+name: loopcode
+
+services:
+  sandbox-python:
+    image: loopcode-sandbox-python:latest
+    build:
+      context: .
+      dockerfile: runner/images/python/Dockerfile
+    network_mode: none
+    restart: "no"
+
+  sandbox-cpp:
+    image: loopcode-sandbox-cpp:latest
+    build:
+      context: .
+      dockerfile: runner/images/cpp/Dockerfile
+    network_mode: none
+    restart: "no"
+
+  sandbox-java:
+    image: loopcode-sandbox-java:latest
+    build:
+      context: .
+      dockerfile: runner/images/java/Dockerfile
+    network_mode: none
+    restart: "no"
+
+  sandbox-javascript:
+    image: loopcode-sandbox-javascript:latest
+    build:
+      context: .
+      dockerfile: runner/images/javascript/Dockerfile
+    network_mode: none
+    restart: "no"
+
+  runner:
+    image: loopcode-runner:latest
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+    depends_on:
+      sandbox-python:
+        condition: service_completed_successfully
+      sandbox-cpp:
+        condition: service_completed_successfully
+      sandbox-java:
+        condition: service_completed_successfully
+      sandbox-javascript:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8001/health'))['docker_available']"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  server:
+    image: loopcode-server:latest
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    depends_on:
+      runner:
+        condition: service_healthy
+    environment:
+      LOOPCODE_DATABASE_URL: sqlite:////data/loopcode.db
+      LOOPCODE_RUNNER_URL: http://runner:8001
+      LOOPCODE_RUNNER_TIMEOUT_SECONDS: ${LOOPCODE_RUNNER_TIMEOUT_SECONDS:-600}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_GENERATION_MODEL: ${OPENAI_GENERATION_MODEL:-gpt-5-mini}
+      OPENAI_TUTOR_MODEL: ${OPENAI_TUTOR_MODEL:-gpt-5-mini}
+    volumes:
+      - loopcode-data:/data
+    networks:
+      - app
+      - egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  web:
+    image: loopcode-web:latest
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"
+    networks:
+      - app
+
+networks:
+  app:
+    internal: true
+  egress:
+
+volumes:
+  loopcode-data:
