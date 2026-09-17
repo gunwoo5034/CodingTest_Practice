@@ -66,6 +66,7 @@ class ProblemSummary(BaseModel):
     status: Literal["draft", "analyzed", "generating", "ready", "needs_review"]
     test_revision: int
     updated_at: UTCDateTime
+    is_solved: bool = False
 
 
 class ProblemPublic(ProblemSummary):

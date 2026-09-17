@@ -15,6 +15,7 @@ def _ok(case_id: str, value, *, stdout: str = "") -> dict:
 
 def test_run_uses_only_visible_tests_and_does_not_call_ai(client, runner, ai):
     problem = client.get("/api/problems").json()[0]
+    assert problem["is_solved"] is False
     runner.execute_responses.append(
         {"results": [_ok(f"case-{i}", value) for i, value in enumerate([6, 0, 12])]}
     )
@@ -29,6 +30,9 @@ def test_run_uses_only_visible_tests_and_does_not_call_ai(client, runner, ai):
     assert job["summary"]["passed"] == 3
     assert len(runner.execute_calls[0]["cases"]) == 3
     assert ai.calls == []
+    assert client.get(f"/api/problems/{problem['id']}").json()["is_solved"] is False
+    listed = {item["id"]: item for item in client.get("/api/problems").json()}
+    assert listed[problem["id"]]["is_solved"] is False
 
 
 def test_submit_redacts_hidden_case_data_and_preserves_snapshot(client, runner):
@@ -48,6 +52,67 @@ def test_submit_redacts_hidden_case_data_and_preserves_snapshot(client, runner):
     assert all(set(item) == {"id", "visibility", "status", "time_ms", "memory_kb"} for item in hidden)
     assert "secret log" not in str(hidden)
     assert job["source"] == "def solution(numbers): return sum(numbers)"
+    assert client.get(f"/api/problems/{problem['id']}").json()["is_solved"] is True
+    listed = {item["id"]: item for item in client.get("/api/problems").json()}
+    assert listed[problem["id"]]["is_solved"] is True
+
+
+def test_partial_submit_is_unsolved_and_later_failure_does_not_clear_success(client, runner):
+    problem = client.get("/api/problems").json()[0]
+    runner.execute_responses.append(
+        {"results": [_ok(f"case-{i}", value) for i, value in enumerate([6, 0, 999, 9, -5])]}
+    )
+    partial = client.post(
+        f"/api/problems/{problem['id']}/jobs",
+        json={"mode": "submit", "language": "python", "source": "def solution(numbers): return 0"},
+    )
+    assert client.get(f"/api/jobs/{partial.json()['id']}").json()["summary"]["all_passed"] is False
+    assert client.get(f"/api/problems/{problem['id']}").json()["is_solved"] is False
+
+    runner.execute_responses.append(
+        {"results": [_ok(f"case-{i}", value) for i, value in enumerate([6, 0, 12, 9, -5])]}
+    )
+    passed = client.post(
+        f"/api/problems/{problem['id']}/jobs",
+        json={"mode": "submit", "language": "python", "source": "def solution(numbers): return sum(numbers)"},
+    )
+    assert client.get(f"/api/jobs/{passed.json()['id']}").json()["summary"]["all_passed"] is True
+
+    runner.execute_responses.append(
+        {"results": [_ok(f"case-{i}", 0) for i in range(5)]}
+    )
+    failed = client.post(
+        f"/api/problems/{problem['id']}/jobs",
+        json={"mode": "submit", "language": "python", "source": "def solution(numbers): return 0"},
+    )
+    assert client.get(f"/api/jobs/{failed.json()['id']}").json()["summary"]["all_passed"] is False
+    assert client.get(f"/api/problems/{problem['id']}").json()["is_solved"] is True
+    changed = client.patch(f"/api/problems/{problem['id']}", json={"statement": "새 문제 설명"})
+    assert changed.json()["status"] == "draft"
+    assert changed.json()["is_solved"] is True
+
+
+def test_solved_state_is_separated_by_problem(client, runner):
+    solved = client.get("/api/problems").json()[0]
+    unsolved = client.post(
+        "/api/problems",
+        json={
+            "title": "미완료 문제",
+            "signature": {
+                "parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}],
+                "return_type": {"base": "int", "dimensions": 0},
+            },
+        },
+    ).json()
+    runner.execute_responses.append(
+        {"results": [_ok(f"case-{i}", value) for i, value in enumerate([6, 0, 12, 9, -5])]}
+    )
+    client.post(
+        f"/api/problems/{solved['id']}/jobs",
+        json={"mode": "submit", "language": "python", "source": "def solution(numbers): return sum(numbers)"},
+    )
+    listed = {item["id"]: item["is_solved"] for item in client.get("/api/problems").json()}
+    assert listed == {solved["id"]: True, unsolved["id"]: False}
 
 
 def test_submit_requires_ready_problem(client, runner):

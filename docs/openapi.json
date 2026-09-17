@@ -1675,6 +1675,11 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "is_solved": {
+            "type": "boolean",
+            "title": "Is Solved",
+            "default": false
+          },
           "statement": {
             "type": "string",
             "title": "Statement"
@@ -1813,6 +1818,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "is_solved": {
+            "type": "boolean",
+            "title": "Is Solved",
+            "default": false
           }
         },
         "type": "object",

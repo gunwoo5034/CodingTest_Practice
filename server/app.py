@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from server.ai_client import AIUnavailable, OpenAIClient
@@ -74,19 +74,36 @@ def _test_public(item: TestCase) -> TestCasePublic:
     )
 
 
-def _problem_summary(problem: Problem) -> ProblemSummary:
+def _solved_problem_ids(db: Session, problem_ids: list[str] | None = None) -> set[str]:
+    if problem_ids is not None and not problem_ids:
+        return set()
+    statement = select(Job.problem_id).where(
+        Job.kind == "execution",
+        Job.mode == "submit",
+        Job.status == "completed",
+        func.json_type(Job.summary, "$.all_passed") == "true",
+        func.json_type(Job.summary, "$.total") == "integer",
+        func.json_extract(Job.summary, "$.total") > 0,
+    )
+    if problem_ids is not None:
+        statement = statement.where(Job.problem_id.in_(problem_ids))
+    return set(db.scalars(statement.distinct()).all())
+
+
+def _problem_summary(problem: Problem, *, is_solved: bool = False) -> ProblemSummary:
     return ProblemSummary(
         id=problem.id,
         title=problem.title,
         status=problem.status,
         test_revision=problem.test_revision,
         updated_at=problem.updated_at,
+        is_solved=is_solved,
     )
 
 
-def _problem_public(problem: Problem) -> ProblemPublic:
+def _problem_public(problem: Problem, *, is_solved: bool = False) -> ProblemPublic:
     return ProblemPublic(
-        **_problem_summary(problem).model_dump(),
+        **_problem_summary(problem, is_solved=is_solved).model_dump(),
         statement=problem.statement,
         example_explanation=problem.example_explanation,
         constraints=problem.constraints,
@@ -246,7 +263,8 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
     @app.get("/api/problems", response_model=list[ProblemSummary], tags=["problems"])
     def list_problems(db: Session = Depends(get_db)):
         problems = db.scalars(select(Problem).order_by(Problem.updated_at.desc())).all()
-        return [_problem_summary(item) for item in problems]
+        solved = _solved_problem_ids(db, [item.id for item in problems])
+        return [_problem_summary(item, is_solved=item.id in solved) for item in problems]
 
     @app.post("/api/problems", response_model=ProblemPublic, status_code=201, tags=["problems"])
     def create_problem(payload: ProblemCreate, db: Session = Depends(get_db)):
@@ -320,7 +338,8 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
 
     @app.get("/api/problems/{problem_id}", response_model=ProblemPublic, tags=["problems"])
     def get_problem(problem_id: str, db: Session = Depends(get_db)):
-        return _problem_public(_problem_or_404(db, problem_id))
+        problem = _problem_or_404(db, problem_id)
+        return _problem_public(problem, is_solved=problem.id in _solved_problem_ids(db, [problem.id]))
 
     @app.patch("/api/problems/{problem_id}", response_model=ProblemPublic, tags=["problems"])
     def update_problem(problem_id: str, payload: ProblemUpdate, db: Session = Depends(get_db)):
@@ -364,7 +383,8 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             raise HTTPException(409, "문제가 변경되었습니다. 최신 상태를 불러온 뒤 다시 시도하세요.")
         db.commit()
         db.expire_all()
-        return _problem_public(_problem_or_404(db, problem_id))
+        problem = _problem_or_404(db, problem_id)
+        return _problem_public(problem, is_solved=problem.id in _solved_problem_ids(db, [problem.id]))
 
     @app.delete("/api/problems/{problem_id}", status_code=204, tags=["problems"])
     def delete_problem(problem_id: str, db: Session = Depends(get_db)):
