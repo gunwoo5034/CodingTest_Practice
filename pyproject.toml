@@ -1,0 +1,28 @@
+[project]
+name = "loopcode"
+version = "0.1.0"
+description = "LoopCode local coding practice application"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "openai>=1.66,<3",
+  "pydantic-settings>=2.7,<3",
+  "python-multipart>=0.0.18,<1",
+  "sqlalchemy>=2.0.36,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "docker>=7.1,<8",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests", "runner/tests"]
+asyncio_mode = "auto"
+
+[tool.uv]
+package = false
