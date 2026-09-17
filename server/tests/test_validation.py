@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from server.schemas import Signature
-from server.validation import DomainValidationError, typed_equal, validate_args
+from server.validation import DomainValidationError, require_all_true, typed_equal, validate_args
 
 
 def test_bool_is_not_accepted_as_int_and_long_requires_decimal_string():
@@ -49,3 +49,13 @@ def test_openapi_public_models_do_not_expose_hidden_payload_fields(client):
     problem = schema["components"]["schemas"]["ProblemPublic"]
     assert "reference_source" not in problem["properties"]
     assert "source_image" not in problem["properties"]
+
+
+@pytest.mark.parametrize("value", [[1], [True, True], [], "true"])
+def test_validator_result_requires_exact_true_boolean_list(value):
+    with pytest.raises(DomainValidationError):
+        require_all_true(value, 1)
+
+
+def test_validator_result_accepts_exact_true_boolean_list():
+    require_all_true([True, True], 2)

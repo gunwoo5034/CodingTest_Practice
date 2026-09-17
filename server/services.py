@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from server.models import AIUsage, Job, Problem, TestCase
 from server.runner_client import RunnerUnavailable
 from server.schemas import Signature
-from server.validation import DomainValidationError, typed_equal, validate_args, validate_case
+from server.validation import DomainValidationError, require_all_true, typed_equal, validate_args, validate_case
 
 
 logger = logging.getLogger(__name__)
@@ -167,8 +167,11 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
     try:
         bundle = await ai.generate(ai_payload)
         signature = Signature.model_validate(problem.signature)
+        visible_args = [item["args"] for item in job.cases_snapshot]
         original_args = [item["args"] for item in public_cases]
         original_expected = [item["expected"] for item in public_cases]
+        visible_validation = await _script(runner, bundle["validator_source"], visible_args)
+        require_all_true(visible_validation, len(visible_args))
         reference_examples = await _execute_sources(runner, problem, bundle["reference_source"], original_args)
         brute_examples = await _execute_sources(runner, problem, bundle["brute_source"], original_args)
         for index, expected in enumerate(original_expected):
@@ -179,8 +182,7 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
         if not isinstance(small_args, list) or len(small_args) != 50:
             raise DomainValidationError("작은 교차 검증 입력 50개가 필요합니다.")
         valid_small = await _script(runner, bundle["validator_source"], small_args)
-        if valid_small != [True] * 50:
-            raise DomainValidationError("작은 입력 중 제한사항을 위반한 항목이 있습니다.")
+        require_all_true(valid_small, 50)
         for args in small_args:
             validate_args(args, signature)
         reference_small = await _execute_sources(runner, problem, bundle["reference_source"], small_args)
@@ -192,8 +194,7 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
         if not isinstance(hidden_args, list) or not hidden_args or len(hidden_args) > 30:
             raise DomainValidationError("히든 테스트 생성 결과가 올바르지 않습니다.")
         valid_hidden = await _script(runner, bundle["validator_source"], hidden_args)
-        if valid_hidden != [True] * len(hidden_args):
-            raise DomainValidationError("히든 입력 중 제한사항을 위반한 항목이 있습니다.")
+        require_all_true(valid_hidden, len(hidden_args))
         for args in hidden_args:
             validate_args(args, signature)
         hidden_expected = await _execute_sources(runner, problem, bundle["reference_source"], hidden_args)

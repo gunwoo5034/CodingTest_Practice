@@ -41,7 +41,10 @@ from server.schemas import (
 )
 from server.services import execute_job, generate_job
 from server.templates import templates_for
-from server.validation import DomainValidationError, typed_equal, validate_args, validate_case
+from server.validation import DomainValidationError, require_all_true, typed_equal, validate_args, validate_case
+
+
+SUPPORTED_LANGUAGES = {"python", "cpp", "java", "javascript"}
 
 
 def _problem_or_404(db: Session, problem_id: str) -> Problem:
@@ -102,6 +105,7 @@ def _job_public(job: Job) -> JobPublic:
         problem_id=job.problem_id,
         mode=job.mode,
         language=job.language,
+        source=job.source,
         status=job.status,
         test_revision=job.test_revision,
         results=job.results or [],
@@ -166,6 +170,28 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         lifespan=lifespan,
     )
     get_db = session_dependency(session_factory)
+
+    async def validate_constraints(problem: Problem, args: list) -> None:
+        if problem.status != "ready":
+            return
+        if not problem.validator_source:
+            raise HTTPException(409, "저장된 제약 검증기가 없습니다. 테스트를 다시 생성하세요.")
+        try:
+            result = await runner.script(
+                {
+                    "source": problem.validator_source,
+                    "payload": [args],
+                    "limits": {"time_ms": 5000, "memory_mb": 256, "output_kb": 1024},
+                }
+            )
+        except RunnerUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if result.get("status") != "ok":
+            raise HTTPException(409, "저장된 제약 검증기를 실행하지 못했습니다. 테스트를 다시 생성하세요.")
+        try:
+            require_all_true(result.get("value"), 1)
+        except DomainValidationError as exc:
+            raise _domain_http(exc)
 
     def schedule(coro):
         async def run_serially():
@@ -304,13 +330,14 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         return Response(status_code=204)
 
     @app.post("/api/problems/{problem_id}/tests", response_model=TestCasePublic, status_code=201, tags=["tests"])
-    def create_test(problem_id: str, payload: TestCaseCreate, db: Session = Depends(get_db)):
+    async def create_test(problem_id: str, payload: TestCaseCreate, db: Session = Depends(get_db)):
         problem = _problem_or_404(db, problem_id)
         _ensure_editable(problem)
         try:
             validate_case(payload.args, payload.expected, Signature.model_validate(problem.signature))
         except DomainValidationError as exc:
             raise _domain_http(exc)
+        await validate_constraints(problem, payload.args)
         problem.test_revision += 1
         position = max((item.position for item in problem.tests), default=-1) + 1
         item = TestCase(problem_id=problem.id, kind="user", position=position, args=payload.args, expected=payload.expected, suite_version=problem.test_revision, provenance={"source": "manual"})
@@ -320,7 +347,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         return _test_public(item)
 
     @app.patch("/api/problems/{problem_id}/tests/{test_id}", response_model=TestCasePublic, tags=["tests"])
-    def update_test(problem_id: str, test_id: str, payload: TestCaseUpdate, db: Session = Depends(get_db)):
+    async def update_test(problem_id: str, test_id: str, payload: TestCaseUpdate, db: Session = Depends(get_db)):
         problem = _problem_or_404(db, problem_id)
         _ensure_editable(problem)
         item = db.get(TestCase, test_id)
@@ -332,6 +359,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             validate_case(args, expected, Signature.model_validate(problem.signature))
         except DomainValidationError as exc:
             raise _domain_http(exc)
+        await validate_constraints(problem, args)
         problem.test_revision += 1
         item.args = args
         item.expected = expected
@@ -361,8 +389,9 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         try:
             validate_args(payload.args, signature)
             validation = await runner.script({"source": problem.validator_source, "payload": [payload.args], "limits": {"time_ms": 5000, "memory_mb": 256, "output_kb": 1024}})
-            if validation.get("status") != "ok" or validation.get("value") != [True]:
-                raise DomainValidationError("입력이 문제 제한사항을 만족하지 않습니다.")
+            if validation.get("status") != "ok":
+                raise DomainValidationError("저장된 제약 검증기 실행에 실패했습니다.")
+            require_all_true(validation.get("value"), 1)
             execution = await runner.execute({"language": "python", "source": problem.reference_source, "signature": problem.signature, "cases": [{"id": "case-0", "args": payload.args}], "limits": {"time_ms": problem.time_limit_ms, "memory_mb": problem.memory_limit_mb, "output_kb": 64}})
             result = next((item for item in execution.get("results", []) if item.get("id") == "case-0"), None)
             if not result or result.get("status") != "ok":
@@ -378,7 +407,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
 
     @app.get("/api/problems/{problem_id}/drafts/{language}", response_model=DraftPublic, tags=["drafts"])
     def get_draft(problem_id: str, language: str, db: Session = Depends(get_db)):
-        if language not in {"python", "cpp", "java"}:
+        if language not in SUPPORTED_LANGUAGES:
             raise HTTPException(422, "지원하지 않는 언어입니다.")
         problem = _problem_or_404(db, problem_id)
         draft = db.scalar(select(CodeDraft).where(CodeDraft.problem_id == problem.id, CodeDraft.language == language))
@@ -388,7 +417,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
 
     @app.put("/api/problems/{problem_id}/drafts/{language}", response_model=DraftPublic, tags=["drafts"])
     def save_draft(problem_id: str, language: str, payload: DraftWrite, db: Session = Depends(get_db)):
-        if language not in {"python", "cpp", "java"}:
+        if language not in SUPPORTED_LANGUAGES:
             raise HTTPException(422, "지원하지 않는 언어입니다.")
         problem = _problem_or_404(db, problem_id)
         draft = db.scalar(select(CodeDraft).where(CodeDraft.problem_id == problem.id, CodeDraft.language == language))
@@ -449,7 +478,8 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         public_cases = sorted((item for item in problem.tests if item.kind == "public"), key=lambda item: item.position)
         if not public_cases:
             raise HTTPException(409, "원본 공개 예제가 하나 이상 필요합니다.")
-        snapshot = [{"id": item.id, "kind": item.kind, "args": item.args, "expected": item.expected} for item in public_cases]
+        visible_cases = _visible_tests(problem)
+        snapshot = [{"id": item.id, "kind": item.kind, "args": item.args, "expected": item.expected} for item in visible_cases]
         job = Job(problem_id=problem.id, kind="generation", status="queued", test_revision=problem.test_revision, signature_snapshot=problem.signature, cases_snapshot=snapshot)
         problem.status = "generating"
         problem.generation_error = None

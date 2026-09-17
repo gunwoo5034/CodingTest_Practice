@@ -9,6 +9,13 @@ class DomainValidationError(ValueError):
     pass
 
 
+def require_all_true(value: Any, expected_length: int) -> None:
+    if not isinstance(value, list) or len(value) != expected_length:
+        raise DomainValidationError("검증기가 입력 개수와 같은 불리언 목록을 반환해야 합니다.")
+    if any(type(item) is not bool or item is not True for item in value):
+        raise DomainValidationError("문제 제한사항을 만족하지 않는 입력이 있습니다.")
+
+
 def validate_value(value: Any, descriptor: TypeDescriptor, path: str = "값") -> None:
     if descriptor.dimensions:
         if not isinstance(value, list):

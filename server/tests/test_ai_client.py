@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from server.ai_client import OpenAIClient
+from server.schemas import AIAnalysisOutput, AIGenerationOutput, AITutorOutput
+
+
+class FakeResponses:
+    def __init__(self, calls):
+        self.calls = calls
+
+    async def parse(self, **kwargs):
+        self.calls.append(kwargs)
+        schema = kwargs["text_format"]
+        if schema is AIAnalysisOutput:
+            parsed = schema(
+                title="문제",
+                statement="설명",
+                constraints=[],
+                signature_json='{"parameters":[{"name":"a","type":{"base":"long","dimensions":0}}],"return_type":{"base":"long","dimensions":0}}',
+                examples_json='[{"args":["1"],"expected":"1"}]',
+            )
+        elif schema is AIGenerationOutput:
+            parsed = schema(
+                reference_source="def solution(a): return a",
+                brute_source="def solution(a): return a",
+                validator_source="def main(payload): return [True] * len(payload)",
+                generator_source="def main(payload): return []",
+                notes="test",
+            )
+        else:
+            parsed = AITutorOutput(content="답변")
+        return SimpleNamespace(
+            output_parsed=parsed,
+            usage=SimpleNamespace(input_tokens=2, output_tokens=3),
+            model="fake-model",
+        )
+
+
+class FakeSDK:
+    def __init__(self, owner):
+        self.owner = owner
+        self.responses = FakeResponses(owner.calls)
+
+    async def __aenter__(self):
+        self.owner.entered += 1
+        return self
+
+    async def __aexit__(self, *_args):
+        self.owner.exited += 1
+
+
+class FakeFactory:
+    def __init__(self):
+        self.created = 0
+        self.entered = 0
+        self.exited = 0
+        self.calls = []
+
+    def __call__(self, **_kwargs):
+        self.created += 1
+        return FakeSDK(self)
+
+
+@pytest.mark.asyncio
+async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_contract():
+    factory = FakeFactory()
+    client = OpenAIClient("key", "generation-model", "tutor-model", client_factory=factory)
+    payload = {"signature": {"parameters": [], "return_type": {"base": "long", "dimensions": 0}}}
+    await client.analyze({"text": "문제", "image": None, "image_mime": None})
+    await client.generate(payload)
+    await client.tutor({"mode": "hint"})
+
+    assert (factory.created, factory.entered, factory.exited) == (3, 3, 3)
+    analysis_prompt = factory.calls[0]["input"][0]["content"]
+    generation_prompt = factory.calls[1]["input"][0]["content"]
+    assert "examples_json" in analysis_prompt
+    assert "10진 문자열" in analysis_prompt
+    assert "seed/count/mode" in generation_prompt
+    assert "정확한 bool 목록" in generation_prompt
+    assert "10진 문자열" in generation_prompt
+    assert all(call["store"] is False for call in factory.calls)

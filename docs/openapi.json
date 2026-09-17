@@ -1075,7 +1075,8 @@
             "enum": [
               "python",
               "cpp",
-              "java"
+              "java",
+              "javascript"
             ],
             "title": "Language"
           },
@@ -1416,7 +1417,8 @@
             "enum": [
               "python",
               "cpp",
-              "java"
+              "java",
+              "javascript"
             ],
             "title": "Language"
           },
@@ -1458,9 +1460,14 @@
             "enum": [
               "python",
               "cpp",
-              "java"
+              "java",
+              "javascript"
             ],
             "title": "Language"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
           },
           "status": {
             "type": "string",
@@ -1536,6 +1543,7 @@
           "problem_id",
           "mode",
           "language",
+          "source",
           "status",
           "test_revision",
           "created_at"
@@ -1659,7 +1667,8 @@
               "enum": [
                 "python",
                 "cpp",
-                "java"
+                "java",
+                "javascript"
               ]
             },
             "type": "object",
@@ -1976,7 +1985,8 @@
                 "enum": [
                   "python",
                   "cpp",
-                  "java"
+                  "java",
+                  "javascript"
                 ]
               },
               {

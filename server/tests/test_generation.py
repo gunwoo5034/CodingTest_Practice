@@ -16,6 +16,13 @@ def _results(values):
 
 def test_generation_crosschecks_and_atomically_installs_tests(client, runner, ai):
     problem = client.get("/api/problems").json()[0]
+    runner.script_responses.append(_script([True]))
+    added = client.post(
+        f"/api/problems/{problem['id']}/tests",
+        json={"args": [[10]], "expected": 10},
+    )
+    assert added.status_code == 201
+    revision_before_generation = client.get(f"/api/problems/{problem['id']}").json()["test_revision"]
     ai.bundle = {
         "reference_source": "def solution(numbers): return sum(numbers)",
         "brute_source": "def solution(numbers):\n total=0\n for n in numbers: total+=n\n return total",
@@ -31,7 +38,7 @@ def test_generation_crosschecks_and_atomically_installs_tests(client, runner, ai
     public_expected = [6, 0, 12]
     small_expected = [0] * 50
     hidden_expected = [2 * i + 1 for i in range(30)]
-    runner.script_responses.extend([_script(small), _script([True] * 50), _script(hidden), _script([True] * 30)])
+    runner.script_responses.extend([_script([True] * 4), _script(small), _script([True] * 50), _script(hidden), _script([True] * 30)])
     runner.execute_responses.extend(
         [
             _results(public_expected),
@@ -50,9 +57,10 @@ def test_generation_crosschecks_and_atomically_installs_tests(client, runner, ai
     assert updated["status"] == "ready"
     assert updated["latest_generation_job_id"] == job["id"]
     assert updated["generation_error"] is None
-    assert updated["test_revision"] == problem["test_revision"] + 1
-    assert len(updated["tests"]) == 3
+    assert updated["test_revision"] == revision_before_generation + 1
+    assert len(updated["tests"]) == 4
     assert all("expected" not in call for call in runner.execute_calls)
+    assert runner.script_calls[1]["payload"] == [[[1, 2, 3]], [[]], [[5, -2, 9]], [[10]]]
 
 
 def test_expected_value_is_computed_locally_without_overwriting(client, runner, ai):
@@ -82,6 +90,7 @@ def test_generation_failure_keeps_existing_tests(client, runner, ai):
         "output_tokens": 1,
     }
     runner.execute_responses.extend([_results([0, 0, 0]), _results([1, 1, 1])])
+    runner.script_responses.append(_script([True] * 3))
     response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 1})
     job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
     assert job["status"] == "failed"
@@ -89,6 +98,25 @@ def test_generation_failure_keeps_existing_tests(client, runner, ai):
     assert updated["status"] == "needs_review"
     assert updated["generation_error"]
     assert updated["tests"] == before
+
+
+def test_generation_rejects_non_boolean_public_validation(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return sum(numbers)",
+        "brute_source": "def solution(numbers): return sum(numbers)",
+        "validator_source": "def main(payload): return [1 for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "bad validator",
+        "model": "fake",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    runner.script_responses.append(_script([1, 1, 1]))
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 2})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert runner.execute_calls == []
 
 
 def test_generation_supplements_public_examples_up_to_three():

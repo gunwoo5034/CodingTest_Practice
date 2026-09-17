@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-Language = Literal["python", "cpp", "java"]
+Language = Literal["python", "cpp", "java", "javascript"]
 BaseType = Literal["int", "long", "string", "bool"]
 
 
@@ -77,6 +77,15 @@ class ProblemUpdate(BaseModel):
     time_limit_ms: int | None = Field(default=None, ge=100, le=10_000)
     memory_limit_mb: int | None = Field(default=None, ge=32, le=1024)
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if isinstance(value, dict):
+            null_fields = [name for name, item in value.items() if name in cls.model_fields and item is None]
+            if null_fields:
+                raise ValueError(f"명시적인 null은 허용되지 않습니다: {', '.join(null_fields)}")
+        return value
+
 
 class TestCaseCreate(BaseModel):
     args: list[Any]
@@ -137,6 +146,7 @@ class JobPublic(BaseModel):
     problem_id: str
     mode: Literal["run", "submit"]
     language: Language
+    source: str
     status: Literal["queued", "running", "completed", "failed", "interrupted"]
     test_revision: int
     results: list[VisibleResult | HiddenResult] = Field(default_factory=list)

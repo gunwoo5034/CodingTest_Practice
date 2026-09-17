@@ -8,6 +8,20 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from server.models import Base, Job, Problem, TestCase
+from server.schemas import Signature
+from server.templates import templates_for
+
+
+DEMO_VALIDATOR_SOURCE = (
+    "def main(payload):\n"
+    "    results = []\n"
+    "    for args in payload:\n"
+    "        valid = isinstance(args, list) and len(args) == 1 and isinstance(args[0], list)\n"
+    "        if valid:\n"
+    "            valid = len(args[0]) <= 100 and all(type(value) is int and -1000 <= value <= 1000 for value in args[0])\n"
+    "        results.append(valid)\n"
+    "    return results\n"
+)
 
 
 def create_database(url: str):
@@ -42,7 +56,27 @@ def initialize_database(engine, session_factory: sessionmaker[Session]) -> None:
                 problem.generation_error = "서버가 재시작되어 생성 작업이 중단되었습니다."
         if db.query(Problem).count() == 0:
             _seed_demo(db)
+        _upgrade_templates(db)
         db.commit()
+
+
+def _upgrade_templates(db: Session) -> None:
+    for problem in db.scalars(select(Problem)).all():
+        generated = templates_for(Signature.model_validate(problem.signature))
+        current = dict(problem.templates or {})
+        changed = False
+        for language, source in generated.items():
+            if language not in current:
+                current[language] = source
+                changed = True
+        java = current.get("java", "")
+        if java.startswith("class Solution"):
+            current["java"] = f"public {java}"
+            changed = True
+        if changed:
+            problem.templates = current
+        if (problem.generation_meta or {}).get("origin") == "built-in" and problem.status == "ready":
+            problem.validator_source = DEMO_VALIDATOR_SOURCE
 
 
 def _seed_demo(db: Session) -> None:
@@ -58,11 +92,12 @@ def _seed_demo(db: Session) -> None:
         templates={
             "python": "def solution(numbers):\n    return sum(numbers)\n",
             "cpp": "int solution(vector<int> numbers) {\n    int answer = 0;\n    for (int n : numbers) answer += n;\n    return answer;\n}\n",
-            "java": "class Solution {\n    public int solution(int[] numbers) {\n        int answer = 0;\n        for (int n : numbers) answer += n;\n        return answer;\n    }\n}\n",
+            "java": "public class Solution {\n    public int solution(int[] numbers) {\n        int answer = 0;\n        for (int n : numbers) answer += n;\n        return answer;\n    }\n}\n",
+            "javascript": "function solution(numbers) {\n    return numbers.reduce((sum, number) => sum + number, 0);\n}\n\nmodule.exports = { solution };\n",
         },
         status="ready",
         reference_source="def solution(numbers):\n    return sum(numbers)\n",
-        validator_source="def main(payload):\n    return [isinstance(a, list) and len(a)==1 and isinstance(a[0], list) for a in payload]\n",
+        validator_source=DEMO_VALIDATOR_SOURCE,
         test_revision=1,
         generation_meta={"origin": "built-in", "seed": 20260917},
         original_examples=[{"args": [[1, 2, 3]], "expected": 6}, {"args": [[]], "expected": 0}, {"args": [[5, -2, 9]], "expected": 12}],

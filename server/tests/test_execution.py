@@ -47,6 +47,7 @@ def test_submit_redacts_hidden_case_data_and_preserves_snapshot(client, runner):
     assert len(hidden) == 2
     assert all(set(item) == {"id", "visibility", "status", "time_ms", "memory_kb"} for item in hidden)
     assert "secret log" not in str(hidden)
+    assert job["source"] == "def solution(numbers): return sum(numbers)"
 
 
 def test_submit_requires_ready_problem(client, runner):
@@ -58,3 +59,19 @@ def test_submit_requires_ready_problem(client, runner):
     )
     assert response.status_code == 409
     assert runner.execute_calls == []
+
+
+def test_javascript_job_uses_node_language_and_default_limits(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    runner.execute_responses.append(
+        {"results": [_ok(f"case-{i}", value) for i, value in enumerate([6, 0, 12])]}
+    )
+    response = client.post(
+        f"/api/problems/{problem['id']}/jobs",
+        json={"mode": "run", "language": "javascript", "source": "function solution(numbers) { return numbers.reduce((a, b) => a + b, 0); }"},
+    )
+    assert response.status_code == 202
+    assert response.json()["language"] == "javascript"
+    assert runner.execute_calls[0]["language"] == "javascript"
+    assert runner.execute_calls[0]["limits"] == {"time_ms": 2000, "memory_mb": 256, "output_kb": 64}
+    assert ai.calls == []
