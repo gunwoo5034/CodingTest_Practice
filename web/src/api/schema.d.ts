@@ -609,16 +609,16 @@ export interface components {
         /** ProblemUpdate */
         ProblemUpdate: {
             /** Title */
-            title?: string | null;
+            title?: string;
             /** Statement */
-            statement?: string | null;
+            statement?: string;
             /** Constraints */
-            constraints?: string[] | null;
-            signature?: components["schemas"]["Signature"] | null;
+            constraints?: string[];
+            signature?: components["schemas"]["Signature"];
             /** Time Limit Ms */
-            time_limit_ms?: number | null;
+            time_limit_ms?: number;
             /** Memory Limit Mb */
-            memory_limit_mb?: number | null;
+            memory_limit_mb?: number;
         };
         /** Signature */
         Signature: {
@@ -628,6 +628,12 @@ export interface components {
         };
         /** TestCaseCreate */
         TestCaseCreate: {
+            /**
+             * Kind
+             * @default user
+             * @enum {string}
+             */
+            kind: "public" | "user";
             /** Args */
             args: unknown[];
             /** Expected */

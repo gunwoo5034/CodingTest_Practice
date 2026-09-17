@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { CodeWorkspace } from './CodeWorkspace';
@@ -54,6 +54,28 @@ describe('CodeWorkspace', () => {
     );
     fireEvent.change(screen.getByLabelText('코드 편집기'), { target: { value: 'function solution() { return 1; }' } });
     view.unmount();
+    await act(async () => { await Promise.resolve(); });
     expect(saveDraft).toHaveBeenCalledWith('javascript', 'function solution() { return 1; }');
+  });
+
+  it('serializes an older autosave before the final save used for a language switch', async () => {
+    vi.useFakeTimers();
+    let finishFirst!: () => void;
+    const first = new Promise<void>((resolve) => { finishFirst = resolve; });
+    const saveDraft = vi.fn().mockImplementationOnce(() => first).mockResolvedValue(undefined);
+    const loadDraft = vi.fn().mockResolvedValue('function solution() {}');
+    render(<CodeWorkspace initialLanguage="python" initialSource="old" onSaveDraft={saveDraft} onLoadDraft={loadDraft} onRun={vi.fn()} onSubmit={vi.fn()} submitDisabled={false} />);
+
+    fireEvent.change(screen.getByLabelText('코드 편집기'), { target: { value: 'edit A' } });
+    await act(async () => { vi.advanceTimersByTime(800); });
+    fireEvent.change(screen.getByLabelText('코드 편집기'), { target: { value: 'edit B' } });
+    fireEvent.change(screen.getByLabelText('언어 선택'), { target: { value: 'javascript' } });
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('저장 중…')).toBeInTheDocument();
+
+    await act(async () => { finishFirst(); await first; });
+    expect(saveDraft).toHaveBeenNthCalledWith(2, 'python', 'edit B');
+    vi.useRealTimers();
+    expect(await screen.findByDisplayValue('function solution() {}')).toBeInTheDocument();
   });
 });

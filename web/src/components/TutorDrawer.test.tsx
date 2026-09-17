@@ -25,4 +25,13 @@ describe('TutorDrawer', () => {
     await user.click(screen.getByRole('button', { name: '정답 요청 확인' }));
     expect(send).toHaveBeenCalledWith('solution', '전체 풀이');
   });
+
+  it('keeps the composed message when the tutor request fails', async () => {
+    const user = userEvent.setup();
+    const send = vi.fn().mockRejectedValue(new Error('API key missing'));
+    render(<TutorDrawer open turns={[]} onClose={vi.fn()} onSend={send} busy={false} />);
+    await user.type(screen.getByLabelText('도우미에게 보낼 내용'), '이 입력은 남아야 합니다');
+    await user.click(screen.getByRole('button', { name: '질문 보내기' }));
+    expect(screen.getByLabelText('도우미에게 보낼 내용')).toHaveValue('이 입력은 남아야 합니다');
+  });
 });

@@ -11,7 +11,7 @@ export function TutorDrawer({ open, turns, onClose, onSend, busy }: Props) {
   const [confirmed, setConfirmed] = useState(false);
   const submit = async () => {
     if (!message.trim() || (mode === 'solution' && !confirmed)) return;
-    await onSend(mode, message.trim()); setMessage(''); setConfirmed(false);
+    try { await onSend(mode, message.trim()); setMessage(''); setConfirmed(false); } catch { /* Parent renders the actionable API error; preserve this draft. */ }
   };
   if (!open) return null;
   return <aside className="tutor-drawer" aria-label="AI 풀이 도우미">

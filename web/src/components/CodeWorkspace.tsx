@@ -25,16 +25,35 @@ export function CodeWorkspace(props: Props) {
   const sourceRef = useRef(source);
   const languageRef = useRef(language);
   const dirtyRef = useRef(false);
+  const revisionRef = useRef(0);
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const mountedRef = useRef(true);
   useEffect(() => { sourceRef.current = source; languageRef.current = language; props.onLanguageChange?.(language, source); }, [language, source]);
-  useEffect(() => () => { window.clearTimeout(timer.current); if (dirtyRef.current) void props.onSaveDraft(languageRef.current, sourceRef.current); }, []);
+  useEffect(() => () => { mountedRef.current = false; window.clearTimeout(timer.current); if (dirtyRef.current) void enqueueSave(languageRef.current, sourceRef.current, revisionRef.current); }, []);
+
+  const enqueueSave = (targetLanguage: Language, targetSource: string, revision: number) => {
+    const request = saveChainRef.current.catch(() => undefined).then(() => props.onSaveDraft(targetLanguage, targetSource));
+    saveChainRef.current = request.catch(() => undefined);
+    return request.then((result) => {
+      if (revisionRef.current === revision && languageRef.current === targetLanguage && sourceRef.current === targetSource) {
+        dirtyRef.current = false;
+        if (mountedRef.current) setSaving('saved');
+      }
+      return result;
+    }).catch((error) => {
+      if (revisionRef.current === revision && mountedRef.current) setSaving('error');
+      throw error;
+    });
+  };
 
   const edit = (next = '') => {
     setSource(next);
     dirtyRef.current = true;
+    const revision = ++revisionRef.current;
     setSaving('saving');
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
-      props.onSaveDraft(language, next).then(() => { dirtyRef.current = false; setSaving('saved'); }).catch(() => setSaving('error'));
+      void enqueueSave(language, next, revision).catch(() => undefined);
     }, 800);
   };
 
@@ -44,13 +63,23 @@ export function CodeWorkspace(props: Props) {
     setSwitching(true);
     setSaving('saving');
     try {
-      await props.onSaveDraft(language, sourceRef.current);
-      dirtyRef.current = false;
+      await enqueueSave(language, sourceRef.current, revisionRef.current);
       const loaded = await props.onLoadDraft(next);
       setLanguage(next);
+      languageRef.current = next;
       setSource(loaded);
+      sourceRef.current = loaded;
       setSaving('saved');
     } catch { setSaving('error'); } finally { setSwitching(false); }
+  };
+
+  const runAction = async (action: Props['onRun'] | Props['onSubmit']) => {
+    window.clearTimeout(timer.current);
+    setSaving('saving');
+    try {
+      await enqueueSave(languageRef.current, sourceRef.current, revisionRef.current);
+      await action(languageRef.current, sourceRef.current);
+    } catch { setSaving('error'); }
   };
 
   const current = languages.find((item) => item.id === language)!;
@@ -64,8 +93,8 @@ export function CodeWorkspace(props: Props) {
       </div>
       <span className={`save-state ${saving}`}>{saving === 'saved' ? '저장됨' : saving === 'saving' ? '저장 중…' : '저장 실패'}</span>
       <div className="toolbar-actions">
-        <button className="button ghost" disabled={props.busy} onClick={() => props.onRun(language, source)}><Play size={16} /> 실행</button>
-        <button className="button primary" disabled={props.busy || props.submitDisabled} onClick={() => props.onSubmit(language, source)}><Send size={16} /> 제출</button>
+        <button className="button ghost" disabled={props.busy || switching} onClick={() => void runAction(props.onRun)}><Play size={16} /> 실행</button>
+        <button className="button primary" disabled={props.busy || switching || props.submitDisabled} onClick={() => void runAction(props.onSubmit)}><Send size={16} /> 제출</button>
       </div>
     </header>
     <Editor
