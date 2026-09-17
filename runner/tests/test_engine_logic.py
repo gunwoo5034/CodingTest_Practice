@@ -4,8 +4,11 @@ import io
 import tarfile
 
 import pytest
+from docker.errors import APIError
 
-from runner.engine import OutputCollector, build_archive, classify_exit, container_options
+from runner.engine import DockerRunner, DockerUnavailable, MonitoredRun, OutputCollector, RuntimeOutputCollector, build_archive, classify_exit, container_options
+from runner.models import Limits
+from runner.wrappers import Bundle
 
 
 def test_archive_is_deterministic_owned_by_sandbox_user_and_bounded():
@@ -29,6 +32,28 @@ def test_output_collector_stops_while_combined_stream_exceeds_limit():
     assert collector.exceeded is True
     assert collector.stdout == b"abc"
     assert collector.stderr == b"de"
+
+
+def test_private_result_frame_is_bounded_and_excluded_across_split_marker_chunks():
+    collector = RuntimeOutputCollector(user_limit=5, control_limit=100, token="token")
+    assert collector.add("stderr", b"abc\n__LOOP") is True
+    assert collector.add("stderr", b"CODE_RESULT__token:") is True
+    assert collector.add("stderr", b'{"value":"large",') is True
+    assert collector.add("stderr", b'"time_ms":1}\n') is True
+    collector.finish()
+
+    assert collector.stderr == b"abc"
+    assert collector.control == b'{"value":"large","time_ms":1}'
+    assert collector.exceeded is False
+
+
+def test_private_result_frame_has_an_independent_size_limit():
+    collector = RuntimeOutputCollector(user_limit=3, control_limit=4, token="token")
+    assert collector.add("stderr", b"abc\n__LOOPCODE_RESULT__token:12345") is False
+
+    assert collector.stderr == b"abc"
+    assert collector.control is None
+    assert collector.exceeded is True
 
 
 @pytest.mark.parametrize(
@@ -58,3 +83,48 @@ def test_runtime_container_has_no_mounts_or_network_and_uses_read_only_root():
     assert "volumes" not in options
     assert "mounts" not in options
     assert "environment" not in options
+
+
+def test_committed_image_is_removed_when_staging_cleanup_fails():
+    class Image:
+        id = "committed-image"
+
+    class Container:
+        id = "stage-container"
+
+        def put_archive(self, path, archive):
+            return True
+
+        def get_archive(self, path):
+            return iter([b"artifact"]), {}
+
+        def commit(self, **kwargs):
+            return Image()
+
+        def remove(self, force):
+            raise APIError("staging cleanup failed")
+
+    class Containers:
+        def create(self, *args, **kwargs):
+            return Container()
+
+    class Images:
+        def __init__(self):
+            self.removed = []
+
+        def remove(self, image, force):
+            self.removed.append((image, force))
+
+    class Client:
+        containers = Containers()
+        images = Images()
+
+    client = Client()
+    runner = DockerRunner(client)
+    runner._monitor = lambda *args, **kwargs: MonitoredRun("ok", b"", b"", 0, False, 1.0)
+    bundle = Bundle("sandbox", {"source": b"source"}, ["compile"], ["run"])
+
+    with pytest.raises(DockerUnavailable):
+        runner._prepare_image(bundle, Limits(time_ms=100, memory_mb=256, output_kb=64))
+
+    assert client.images.removed == [("committed-image", True)]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 
 import docker
 import pytest
@@ -101,7 +103,7 @@ def test_runtime_limits_are_reported_and_containers_are_cleaned(runner):
     )
     result = runner.execute(request)["results"][0]
     assert result["status"] == "output_limit"
-    assert len(result["stdout"].encode()) <= 1025
+    assert len(result["stdout"].encode()) <= 1024
     assert not runner._docker().containers.list(all=True, filters={"label": "com.loopcode.sandbox=true"})
 
 
@@ -149,3 +151,84 @@ def solution(value):
     )
     result = runner.execute(request)["results"][0]
     assert (result["status"], result["value"]) == ("ok", [True, True, True, True])
+
+
+def test_result_frame_does_not_consume_user_output_budget(runner):
+    returned = "y" * 100_000
+    request = ExecuteRequest.model_validate(
+        {
+            "language": "python",
+            "source": "def solution(value):\n    print('x' * 1000)\n    return 'y' * 100000",
+            "signature": {"parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}], "return_type": {"base": "string", "dimensions": 0}},
+            "cases": [{"id": "large-result", "args": [1]}],
+            "limits": {"time_ms": 2000, "memory_mb": 256, "output_kb": 1},
+        }
+    )
+    result = runner.execute(request)["results"][0]
+    assert (result["status"], result["value"]) == ("ok", returned)
+    assert result["stdout"] == "x" * 1000 + "\n"
+
+
+def test_java_heap_exhaustion_is_memory_limit(runner):
+    request = ExecuteRequest.model_validate(
+        {
+            "language": "java",
+            "source": "public class Solution { public int solution(int value) { int[] data = new int[60000000]; return data.length; } }",
+            "signature": {"parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}], "return_type": {"base": "int", "dimensions": 0}},
+            "cases": [{"id": "heap", "args": [1]}],
+            "limits": {"time_ms": 4000, "memory_mb": 128, "output_kb": 64},
+        }
+    )
+    result = runner.execute(request)["results"][0]
+    assert result["status"] == "memory_limit"
+    assert "OutOfMemoryError" in result["stderr"]
+
+
+def test_large_unread_stdin_cannot_block_wall_deadline(runner):
+    request = ExecuteRequest.model_validate(
+        {
+            "language": "javascript",
+            "source": "while (true) {}\nfunction solution(value) { return value.length; }",
+            "signature": {"parameters": [{"name": "value", "type": {"base": "string", "dimensions": 0}}], "return_type": {"base": "int", "dimensions": 0}},
+            "cases": [{"id": "blocked-stdin", "args": ["x" * (32 * 1024 * 1024)]}],
+            "limits": {"time_ms": 100, "memory_mb": 256, "output_kb": 64},
+        }
+    )
+    values: list[dict] = []
+    errors: list[BaseException] = []
+
+    def execute() -> None:
+        try:
+            values.append(runner.execute(request))
+        except BaseException as exc:
+            errors.append(exc)
+
+    started = time.monotonic()
+    thread = threading.Thread(target=execute, daemon=True)
+    thread.start()
+    thread.join(5)
+    if thread.is_alive():
+        for container in runner._docker().containers.list(all=True, filters={"label": "com.loopcode.sandbox=true"}):
+            container.remove(force=True)
+        thread.join(2)
+    assert not thread.is_alive(), "runner remained blocked writing stdin after its deadline"
+    assert not errors
+    assert values[0]["results"][0]["status"] == "time_limit"
+    assert time.monotonic() - started < 5
+
+
+def test_unread_stdin_within_public_request_budget_obeys_deadline(runner):
+    request = ExecuteRequest.model_validate(
+        {
+            "language": "javascript",
+            "source": "while (true) {}\nfunction solution(value) { return value.length; }",
+            "signature": {"parameters": [{"name": "value", "type": {"base": "string", "dimensions": 0}}], "return_type": {"base": "int", "dimensions": 0}},
+            "cases": [{"id": "public-budget", "args": ["x" * 1_500_000]}],
+            "limits": {"time_ms": 100, "memory_mb": 256, "output_kb": 64},
+        }
+    )
+    assert len(request.model_dump_json().encode()) < 2 * 1024 * 1024
+    started = time.monotonic()
+    result = runner.execute(request)["results"][0]
+    assert result["status"] == "time_limit"
+    assert time.monotonic() - started < 5

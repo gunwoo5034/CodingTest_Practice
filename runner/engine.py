@@ -4,6 +4,7 @@ import io
 import json
 import posixpath
 import secrets
+import socket
 import tarfile
 import threading
 import time
@@ -15,8 +16,11 @@ import docker
 from docker.errors import APIError, DockerException, NotFound
 from docker.utils.socket import STDERR, STDOUT, frames_iter
 
-from runner.models import ARTIFACT_LIMIT, ExecuteRequest, Limits, ScriptRequest, validate_wire_value
-from runner.wrappers import Bundle, build_execute_bundle, build_script_bundle, parse_control_frame
+from runner.models import ARTIFACT_LIMIT, REQUEST_LIMIT, ExecuteRequest, Limits, ScriptRequest, validate_wire_value
+from runner.wrappers import CONTROL_PREFIX, Bundle, build_execute_bundle, build_script_bundle
+
+
+CONTROL_LIMIT = REQUEST_LIMIT + 64 * 1024
 
 
 @dataclass
@@ -47,6 +51,92 @@ class OutputCollector:
     @property
     def stderr(self) -> bytes:
         return b"".join(self.stderr_parts)
+
+
+class RuntimeOutputCollector:
+    """Separates the private result frame from bounded user output as bytes arrive."""
+
+    def __init__(self, *, user_limit: int, control_limit: int, token: str) -> None:
+        self._user = OutputCollector(user_limit)
+        self._marker = ("\n" + CONTROL_PREFIX + token + ":").encode()
+        self._pending = bytearray()
+        self._control = bytearray()
+        self._control_limit = control_limit
+        self._in_control = False
+        self._control_complete = False
+        self._control_exceeded = False
+
+    def add(self, stream: Literal["stdout", "stderr"], chunk: bytes) -> bool:
+        if self.exceeded:
+            return False
+        if stream == "stdout":
+            return self._user.add(stream, chunk)
+        return self._add_stderr(chunk)
+
+    def _add_stderr(self, chunk: bytes) -> bool:
+        if self._control_complete:
+            return self._user.add("stderr", chunk)
+        if self._in_control:
+            return self._add_control(chunk)
+
+        data = bytes(self._pending) + chunk
+        self._pending.clear()
+        marker_index = data.find(self._marker)
+        if marker_index >= 0:
+            if not self._user.add("stderr", data[:marker_index]):
+                return False
+            self._in_control = True
+            return self._add_control(data[marker_index + len(self._marker) :])
+
+        suffix_size = self._marker_prefix_suffix_size(data)
+        confirmed = data[:-suffix_size] if suffix_size else data
+        if suffix_size:
+            self._pending.extend(data[-suffix_size:])
+        return self._user.add("stderr", confirmed)
+
+    def _add_control(self, data: bytes) -> bool:
+        end = data.find(b"\n")
+        control_data = data if end < 0 else data[:end]
+        remaining = max(0, self._control_limit - len(self._control))
+        self._control.extend(control_data[:remaining])
+        if len(control_data) > remaining:
+            self._control_exceeded = True
+            return False
+        if end >= 0:
+            self._control_complete = True
+            self._in_control = False
+            return self._user.add("stderr", data[end + 1 :])
+        return True
+
+    def _marker_prefix_suffix_size(self, data: bytes) -> int:
+        maximum = min(len(data), len(self._marker) - 1)
+        for size in range(maximum, 0, -1):
+            if data.endswith(self._marker[:size]):
+                return size
+        return 0
+
+    def finish(self) -> bool:
+        if not self._in_control and not self._control_complete and self._pending:
+            pending = bytes(self._pending)
+            self._pending.clear()
+            return self._user.add("stderr", pending)
+        return not self.exceeded
+
+    @property
+    def exceeded(self) -> bool:
+        return self._user.exceeded or self._control_exceeded
+
+    @property
+    def stdout(self) -> bytes:
+        return self._user.stdout
+
+    @property
+    def stderr(self) -> bytes:
+        return self._user.stderr
+
+    @property
+    def control(self) -> bytes | None:
+        return bytes(self._control) if self._control_complete and not self._control_exceeded else None
 
 
 def build_archive(files: dict[str, bytes], *, max_bytes: int) -> bytes:
@@ -117,6 +207,7 @@ class MonitoredRun:
     exit_code: int
     oom_killed: bool
     elapsed_ms: float
+    control: bytes | None = None
 
 
 class DockerRunner:
@@ -192,6 +283,7 @@ class DockerRunner:
     def _prepare_image(self, bundle: Bundle, limits: Limits):
         client = self._docker()
         container = None
+        committed_image = None
         try:
             options = container_options(memory_mb=1024, pids=128, read_only=False)
             container = client.containers.create(bundle.image, command=bundle.compile_command, **options)
@@ -212,11 +304,19 @@ class DockerRunner:
                     run.stderr += b"compiled artifact exceeds 32MiB"
                     return None, run
             repository = f"loopcode-job-{uuid.uuid4().hex}"
-            image = container.commit(repository=repository, tag="latest")
-            return image, run
+            committed_image = container.commit(repository=repository, tag="latest")
+            return committed_image, run
         finally:
             if container is not None:
-                self._remove_container(container)
+                try:
+                    self._remove_container(container)
+                except Exception:
+                    if committed_image is not None:
+                        try:
+                            client.images.remove(committed_image.id, force=True)
+                        except DockerException:
+                            pass
+                    raise
 
     def _run_case(self, image: str, command: list[str], message: dict, limits: Limits, pids: int) -> tuple[MonitoredRun, str]:
         container = None
@@ -225,21 +325,37 @@ class DockerRunner:
         try:
             options = container_options(memory_mb=limits.memory_mb, pids=pids, read_only=True)
             container = self._docker().containers.create(image, command=command, **options)
-            outcome = self._monitor(container, timeout_seconds=limits.time_ms / 1000, output_limit=limits.output_kb * 1024, stdin=payload)
+            outcome = self._monitor(
+                container,
+                timeout_seconds=limits.time_ms / 1000,
+                output_limit=limits.output_kb * 1024,
+                stdin=payload,
+                control_token=token,
+            )
+            if command and command[0] == "java" and outcome.status == "runtime_error" and b"java.lang.OutOfMemoryError" in outcome.stderr:
+                outcome.status = "memory_limit"
             return outcome, token
         finally:
             if container is not None:
                 self._remove_container(container)
 
-    def _monitor(self, container, *, timeout_seconds: float, output_limit: int, stdin: bytes | None) -> MonitoredRun:
-        collector = OutputCollector(output_limit)
+    def _monitor(
+        self,
+        container,
+        *,
+        timeout_seconds: float,
+        output_limit: int,
+        stdin: bytes | None,
+        control_token: str | None = None,
+    ) -> MonitoredRun:
+        collector = RuntimeOutputCollector(user_limit=output_limit, control_limit=CONTROL_LIMIT, token=control_token) if control_token else OutputCollector(output_limit)
         trigger: list[str | None] = [None]
         reader_error: list[Exception] = []
         wait_result: list[dict] = []
         wait_error: list[Exception] = []
         finished = threading.Event()
-        params = {"stdout": 1, "stderr": 1, "stream": 1, "stdin": 1 if stdin is not None else 0}
-        attached = container.attach_socket(params=params)
+        attached = container.attach_socket(params={"stdout": 1, "stderr": 1, "stream": 1, "stdin": 0})
+        input_attached = container.attach_socket(params={"stdout": 0, "stderr": 0, "stream": 1, "stdin": 1}) if stdin is not None else None
 
         def reader() -> None:
             try:
@@ -263,23 +379,37 @@ class DockerRunner:
             finally:
                 finished.set()
 
+        raw = getattr(input_attached, "_sock", input_attached) if input_attached is not None else None
+        if raw is not None:
+            raw.settimeout(max(0.05, timeout_seconds))
+
+        def writer() -> None:
+            try:
+                if stdin is not None:
+                    raw.sendall(stdin)
+            except OSError:
+                pass
+
         started = time.monotonic()
         thread = threading.Thread(target=reader, name=f"runner-output-{container.id[:8]}", daemon=True)
         wait_thread = threading.Thread(target=waiter, name=f"runner-wait-{container.id[:8]}", daemon=True)
+        writer_thread = threading.Thread(target=writer, name=f"runner-input-{container.id[:8]}", daemon=True) if stdin is not None else None
         try:
             container.start()
             thread.start()
             wait_thread.start()
-            if stdin is not None:
-                raw = getattr(attached, "_sock", attached)
-                raw.sendall(stdin)
-            if not finished.wait(timeout_seconds):
+            if writer_thread is not None:
+                writer_thread.start()
+            remaining = max(0.0, timeout_seconds - (time.monotonic() - started))
+            if not finished.wait(remaining):
                 if trigger[0] is None:
                     trigger[0] = "timeout"
                 self._kill(container)
                 finished.wait(5)
             wait_thread.join(timeout=1)
             thread.join(timeout=5)
+            if isinstance(collector, RuntimeOutputCollector) and not collector.finish() and trigger[0] is None:
+                trigger[0] = "output"
             if wait_error:
                 raise DockerUnavailable("Docker wait transport failed") from wait_error[0]
             if not wait_result:
@@ -292,26 +422,41 @@ class DockerRunner:
             status = classify_exit(trigger=trigger[0], oom_killed=oom, exit_code=exit_code, has_control=True)
             if reader_error and trigger[0] is None:
                 raise DockerUnavailable("Docker output transport failed") from reader_error[0]
-            return MonitoredRun(status, collector.stdout, collector.stderr, exit_code, oom, elapsed)
+            control = collector.control if isinstance(collector, RuntimeOutputCollector) else None
+            return MonitoredRun(status, collector.stdout, collector.stderr, exit_code, oom, elapsed, control)
         finally:
+            if raw is not None:
+                try:
+                    raw.shutdown(socket.SHUT_RDWR)
+                except (AttributeError, OSError):
+                    pass
+            if input_attached is not None:
+                try:
+                    input_attached.close()
+                except Exception:
+                    pass
             try:
                 attached.close()
             except Exception:
                 pass
+            if writer_thread is not None:
+                writer_thread.join()
 
     def _outcome_result(self, value: tuple[MonitoredRun, str], descriptor) -> dict:
-        outcome, token = value
-        control, stdout, stderr = parse_control_frame(outcome.stdout, outcome.stderr, token)
-        status = classify_exit(
-            trigger="output" if outcome.status == "output_limit" else "timeout" if outcome.status == "time_limit" else None,
-            oom_killed=outcome.oom_killed,
-            exit_code=outcome.exit_code,
-            has_control=control is not None,
-        )
+        outcome, _token = value
+        try:
+            control = json.loads(outcome.control) if outcome.control is not None else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            control = None
+        stdout, stderr = outcome.stdout, outcome.stderr
+        if outcome.status in {"output_limit", "time_limit", "memory_limit"}:
+            status = outcome.status
+        else:
+            status = classify_exit(trigger=None, oom_killed=outcome.oom_killed, exit_code=outcome.exit_code, has_control=isinstance(control, dict))
         result_value = None
         time_ms = outcome.elapsed_ms
         memory_kb = 0
-        if status == "ok" and control is not None:
+        if status == "ok" and isinstance(control, dict):
             result_value = control.get("value")
             try:
                 time_ms = max(0.0, float(control["time_ms"]))
