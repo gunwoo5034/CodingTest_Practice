@@ -19,3 +19,7 @@ uploads/
 .DS_Store
 .worktrees/
 docs/work/
+
+# Keep development documents local; publish only the root README.
+*.md
+!/README.md
