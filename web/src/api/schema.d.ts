@@ -291,7 +291,7 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "analyze" | "generate" | "tutor";
+            operation: "analyze" | "generate" | "format_repair" | "tutor";
             /** Model */
             model: string;
             /** Input Tokens */
@@ -423,6 +423,13 @@ export interface components {
             hidden_count: number;
             /** Model */
             model: string;
+            /** Output Format */
+            output_format?: ("none" | "concat_decimal" | "space_separated" | "comma_separated" | "json_array") | null;
+            /**
+             * Format Repair Attempted
+             * @default false
+             */
+            format_repair_attempted: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -572,6 +579,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Is Solved
+             * @default false
+             */
+            is_solved: boolean;
             /** Statement */
             statement: string;
             /** Example Explanation */
@@ -593,6 +605,8 @@ export interface components {
             latest_generation_job_id?: string | null;
             /** Generation Error */
             generation_error?: string | null;
+            /** Output Format */
+            output_format: ("none" | "concat_decimal" | "space_separated" | "comma_separated" | "json_array") | null;
         };
         /** ProblemSummary */
         ProblemSummary: {
@@ -612,6 +626,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Is Solved
+             * @default false
+             */
+            is_solved: boolean;
         };
         /** ProblemUpdate */
         ProblemUpdate: {

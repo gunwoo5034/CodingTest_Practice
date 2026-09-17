@@ -116,3 +116,28 @@
 .result-log.stderr pre {
   color: #ff9aac;
 }
+
+.preparation-note {
+  margin: 10px 0 16px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.notice.success {
+  background: #103029;
+  border-color: #286957;
+  color: #91efd1;
+}
+
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.status-solved {
+  background: #143c35;
+  color: #8df0d1;
+}

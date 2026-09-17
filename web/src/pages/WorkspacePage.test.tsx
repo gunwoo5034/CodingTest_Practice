@@ -3,16 +3,16 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspacePage } from './WorkspacePage';
 
-const mocks = vi.hoisted(() => ({ problem: vi.fn(), draft: vi.fn(), submissions: vi.fn(), chat: vi.fn(), startJob: vi.fn(), job: vi.fn(), tutor: vi.fn(), deleteTest: vi.fn(), workspaceRuns: new Map<string, (language: 'python', source: string) => Promise<unknown>>() }));
+const mocks = vi.hoisted(() => ({ problem: vi.fn(), draft: vi.fn(), submissions: vi.fn(), chat: vi.fn(), startJob: vi.fn(), job: vi.fn(), tutor: vi.fn(), deleteTest: vi.fn(), workspaceRuns: new Map<string, (language: 'python', source: string) => Promise<unknown>>(), workspaceSubmits: new Map<string, (language: 'python', source: string) => Promise<unknown>>() }));
 vi.mock('../api/client', async (load) => ({ ...(await load<typeof import('../api/client')>()), api: mocks }));
-vi.mock('../components/CodeWorkspace', () => ({ CodeWorkspace: ({ problemId, initialSource, onRun }: { problemId: string; initialSource: string; onRun: (language: 'python', source: string) => Promise<unknown> }) => { mocks.workspaceRuns.set(problemId, onRun); return <div data-testid="editor-source">{initialSource}<button onClick={() => void onRun('python', initialSource)}>mock run</button></div>; } }));
+vi.mock('../components/CodeWorkspace', () => ({ CodeWorkspace: ({ problemId, initialSource, onRun, onSubmit }: { problemId: string; initialSource: string; onRun: (language: 'python', source: string) => Promise<unknown>; onSubmit: (language: 'python', source: string) => Promise<unknown> }) => { mocks.workspaceRuns.set(problemId, onRun); mocks.workspaceSubmits.set(problemId, onSubmit); return <div data-testid="editor-source">{initialSource}<button onClick={() => void onRun('python', initialSource)}>mock run</button><button onClick={() => void onSubmit('python', initialSource)}>mock submit</button></div>; } }));
 vi.mock('../components/TutorDrawer', () => ({ TutorDrawer: ({ onSend }: { onSend: (mode: 'hint', message: string) => Promise<void> }) => <button onClick={() => void onSend('hint', '도와줘').catch(() => undefined)}>mock tutor</button> }));
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
-const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, example_explanation: '', constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [] });
+const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, example_explanation: '', constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [], output_format: null, is_solved: false });
 
 describe('WorkspacePage route identity', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.workspaceRuns.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.workspaceRuns.clear(); mocks.workspaceSubmits.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
   it('ignores an older problem load after navigating to another problem', async () => {
     const a = deferred<ReturnType<typeof makeProblem>>(); const b = deferred<ReturnType<typeof makeProblem>>();
     const draftA = deferred<{ source: string }>(); const draftB = deferred<{ source: string }>();
@@ -115,5 +115,40 @@ describe('WorkspacePage route identity', () => {
     const outputLabel = await screen.findByText('출력'); const errorLabel = screen.getByText('오류 출력');
     expect(outputLabel.parentElement?.querySelector('pre')?.textContent).toBe(stdout);
     expect(errorLabel.parentElement?.querySelector('pre')?.textContent).toBe(stderr);
+  });
+
+  it('refreshes solved state after a completed submit but not after a run', async () => {
+    mocks.problem.mockResolvedValueOnce(makeProblem('a', '제출 문제')).mockResolvedValueOnce({ ...makeProblem('a', '제출 문제'), is_solved: true });
+    mocks.startJob.mockImplementation((_id: string, body: { mode: string }) => Promise.resolve({ id: `${body.mode}-job`, status: 'queued', mode: body.mode, language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' }));
+    mocks.job.mockResolvedValue({ id: 'job', status: 'completed', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '제출 문제' });
+    await mocks.workspaceRuns.get('a')!('python', 'run source');
+    expect(mocks.problem).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTitle('전체 통과한 제출 기록이 있습니다.')).not.toBeInTheDocument();
+    await mocks.workspaceSubmits.get('a')!('python', 'submit source');
+    expect(await screen.findByTitle('전체 통과한 제출 기록이 있습니다.')).toHaveTextContent('풀이 완료');
+    expect(mocks.problem).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not apply a late solved refresh from the previous problem', async () => {
+    const lateSolved = deferred<ReturnType<typeof makeProblem>>();
+    let deferARefresh = false;
+    mocks.problem.mockImplementation((id: string) => id === 'a' && deferARefresh ? lateSolved.promise : Promise.resolve(makeProblem(id, `문제 ${id.toUpperCase()}`)));
+    mocks.startJob.mockResolvedValue({ id: 'submit-job', status: 'queued', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' });
+    mocks.job.mockResolvedValue({ id: 'submit-job', status: 'completed', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '문제 A' });
+    deferARefresh = true;
+    const submitA = mocks.workspaceSubmits.get('a')!('python', 'source');
+    await waitFor(() => expect(mocks.problem).toHaveBeenCalledTimes(2));
+    await router.navigate('/problems/b');
+    await screen.findByRole('heading', { name: '문제 B' });
+    lateSolved.resolve({ ...makeProblem('a', '문제 A'), is_solved: true });
+    await submitA;
+    expect(screen.getByRole('heading', { name: '문제 B' })).toBeInTheDocument();
+    expect(screen.queryByTitle('전체 통과한 제출 기록이 있습니다.')).not.toBeInTheDocument();
   });
 });

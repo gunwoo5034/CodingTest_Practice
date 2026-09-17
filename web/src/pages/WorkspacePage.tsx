@@ -35,7 +35,7 @@ export function WorkspacePage() {
     try {
       const started = await api.startJob(routeId, { mode, language, source }); if (!active()) return; setJob(started);
       const result = await pollJob(() => api.job(started.id)); if (!active()) return; setJob(result);
-      if (mode === 'submit') { const history = await api.submissions(routeId); if (!active()) return; setSubmissions(history); }
+      if (mode === 'submit') { const history = await api.submissions(routeId); if (!active()) return; const refreshed = await api.problem(routeId); if (!active()) return; setSubmissions(history); setProblem(refreshed); }
       if (result.error && active()) setError(result.error);
     } catch (e) { if (active()) setError((e as Error).message); }
     finally { if (active()) setBusy(false); }
@@ -51,7 +51,7 @@ export function WorkspacePage() {
   if (!problem) return <div className="workspace-loading">{error || '작업공간을 준비하는 중…'}</div>;
   const publicTests = problem.tests.filter((item) => item.kind === 'public');
   return <div className="workspace-page">
-    <header className="workspace-header"><div className="workspace-title"><Link aria-label="문제 목록" to="/"><ArrowLeft /></Link><div><span className="eyebrow">PRACTICE WORKSPACE</span><h1>{problem.title}</h1></div><StatusBadge status={problem.status} /></div><div className="workspace-meta"><span>{problem.time_limit_ms.toLocaleString()} ms</span><span>{problem.memory_limit_mb} MB</span><Link to={`/problems/${id}/edit`} className="button ghost"><Edit3 size={16} /> 문제 편집</Link><button className={`button tutor-toggle ${tutorOpen ? 'active' : ''}`} onClick={() => setTutorOpen(!tutorOpen)}><Bot size={17} /> 풀이 도우미</button></div></header>
+    <header className="workspace-header"><div className="workspace-title"><Link aria-label="문제 목록" to="/"><ArrowLeft /></Link><div><span className="eyebrow">PRACTICE WORKSPACE</span><h1>{problem.title}</h1></div><StatusBadge status={problem.status} />{problem.is_solved && <span className="status-badge status-solved" title="전체 통과한 제출 기록이 있습니다.">풀이 완료</span>}</div><div className="workspace-meta"><span>{problem.time_limit_ms.toLocaleString()} ms</span><span>{problem.memory_limit_mb} MB</span><Link to={`/problems/${id}/edit`} className="button ghost"><Edit3 size={16} /> 문제 편집</Link><button className={`button tutor-toggle ${tutorOpen ? 'active' : ''}`} onClick={() => setTutorOpen(!tutorOpen)}><Bot size={17} /> 풀이 도우미</button></div></header>
     {error && <div className="workspace-alert"><XCircle size={17} />{error}<button onClick={() => setError('')}>닫기</button></div>}
     <div className="workspace-content" style={{ gridTemplateColumns: `${split}% 6px 1fr` }}>
       <section className="statement-pane"><div className="statement-scroll">

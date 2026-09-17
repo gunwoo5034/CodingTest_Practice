@@ -9,6 +9,7 @@
   .workspace-header { min-width: 0; gap: 8px; }
   .workspace-title, .workspace-title > div { min-width: 0; }
   .workspace-title h1 { max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace-title .status-solved { display: inline-flex; }
   .workspace-meta { min-width: 42px; }
   .right-workspace, .editor-slot { min-width: 0; }
   .bottom-dock > header { min-width: 0; }
