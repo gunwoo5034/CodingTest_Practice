@@ -29,12 +29,14 @@ export function CodeWorkspace(props: Props) {
   const languageRef = useRef(language);
   const dirtyRef = useRef(false);
   const revisionRef = useRef(0);
+  const actionRef = useRef(0);
   const mountedRef = useRef(true);
   useEffect(() => { sourceRef.current = source; languageRef.current = language; props.onLanguageChange?.(language, source); }, [language, source]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      actionRef.current += 1;
       window.clearTimeout(timer.current);
       if (dirtyRef.current) void enqueueSave(languageRef.current, sourceRef.current, revisionRef.current).catch((error: Error) => props.onSaveError?.(error.message));
     };
@@ -83,12 +85,14 @@ export function CodeWorkspace(props: Props) {
   };
 
   const runAction = async (action: Props['onRun'] | Props['onSubmit']) => {
+    const operation = ++actionRef.current;
     window.clearTimeout(timer.current);
     setSaving('saving');
     try {
       await enqueueSave(languageRef.current, sourceRef.current, revisionRef.current);
+      if (!mountedRef.current || actionRef.current !== operation) return;
       await action(languageRef.current, sourceRef.current);
-    } catch { setSaving('error'); }
+    } catch { if (mountedRef.current && actionRef.current === operation) setSaving('error'); }
   };
 
   const current = languages.find((item) => item.id === language)!;

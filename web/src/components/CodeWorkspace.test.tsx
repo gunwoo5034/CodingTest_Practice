@@ -119,4 +119,18 @@ describe('CodeWorkspace', () => {
     expect(screen.getByText('저장됨')).toBeInTheDocument();
     vi.useRealTimers();
   });
+
+  it('does not run the previous problem after its delayed draft save finishes', async () => {
+    let finishSave!: () => void;
+    const pendingSave = new Promise<void>((resolve) => { finishSave = resolve; });
+    const runA = vi.fn();
+    const first = render(<CodeWorkspace problemId="a" initialLanguage="python" initialSource="old" onSaveDraft={() => pendingSave} onLoadDraft={vi.fn()} onRun={runA} onSubmit={vi.fn()} submitDisabled={false} />);
+    fireEvent.change(screen.getByLabelText('코드 편집기'), { target: { value: 'edited A' } });
+    fireEvent.click(screen.getByRole('button', { name: '실행' }));
+    first.unmount();
+    render(<CodeWorkspace problemId="b" initialLanguage="python" initialSource="B" onSaveDraft={vi.fn().mockResolvedValue(undefined)} onLoadDraft={vi.fn()} onRun={vi.fn()} onSubmit={vi.fn()} submitDisabled={false} />);
+    await act(async () => { finishSave(); await pendingSave; await Promise.resolve(); });
+    expect(runA).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('코드 편집기')).toHaveValue('B');
+  });
 });

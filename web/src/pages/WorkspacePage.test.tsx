@@ -3,16 +3,16 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspacePage } from './WorkspacePage';
 
-const mocks = vi.hoisted(() => ({ problem: vi.fn(), draft: vi.fn(), submissions: vi.fn(), chat: vi.fn(), startJob: vi.fn(), job: vi.fn(), tutor: vi.fn(), deleteTest: vi.fn() }));
+const mocks = vi.hoisted(() => ({ problem: vi.fn(), draft: vi.fn(), submissions: vi.fn(), chat: vi.fn(), startJob: vi.fn(), job: vi.fn(), tutor: vi.fn(), deleteTest: vi.fn(), workspaceRuns: new Map<string, (language: 'python', source: string) => Promise<unknown>>() }));
 vi.mock('../api/client', async (load) => ({ ...(await load<typeof import('../api/client')>()), api: mocks }));
-vi.mock('../components/CodeWorkspace', () => ({ CodeWorkspace: ({ initialSource, onRun }: { initialSource: string; onRun: (language: 'python', source: string) => Promise<unknown> }) => <div data-testid="editor-source">{initialSource}<button onClick={() => void onRun('python', initialSource)}>mock run</button></div> }));
+vi.mock('../components/CodeWorkspace', () => ({ CodeWorkspace: ({ problemId, initialSource, onRun }: { problemId: string; initialSource: string; onRun: (language: 'python', source: string) => Promise<unknown> }) => { mocks.workspaceRuns.set(problemId, onRun); return <div data-testid="editor-source">{initialSource}<button onClick={() => void onRun('python', initialSource)}>mock run</button></div>; } }));
 vi.mock('../components/TutorDrawer', () => ({ TutorDrawer: ({ onSend }: { onSend: (mode: 'hint', message: string) => Promise<void> }) => <button onClick={() => void onSend('hint', '도와줘').catch(() => undefined)}>mock tutor</button> }));
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [] });
 
 describe('WorkspacePage route identity', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.workspaceRuns.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
   it('ignores an older problem load after navigating to another problem', async () => {
     const a = deferred<ReturnType<typeof makeProblem>>(); const b = deferred<ReturnType<typeof makeProblem>>();
     const draftA = deferred<{ source: string }>(); const draftB = deferred<{ source: string }>();
@@ -59,5 +59,22 @@ describe('WorkspacePage route identity', () => {
     render(<RouterProvider router={router} />);
     fireEvent.click(await screen.findByRole('button', { name: '테스트 1 삭제' }));
     await waitFor(() => expect(screen.getByText('테스트 삭제 실패')).toBeInTheDocument());
+  });
+
+  it('rejects a captured run callback after another problem has loaded', async () => {
+    mocks.problem.mockImplementation((id: string) => Promise.resolve(makeProblem(id, `문제 ${id.toUpperCase()}`)));
+    const currentRun = deferred<Record<string, unknown>>();
+    mocks.startJob.mockImplementation((id: string) => id === 'b' ? Promise.resolve({ id: 'b-job', status: 'queued', mode: 'run', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' }) : Promise.reject(new Error('stale A started')));
+    mocks.job.mockReturnValue(currentRun.promise);
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '문제 A' });
+    const staleRun = mocks.workspaceRuns.get('a')!;
+    await router.navigate('/problems/b');
+    await screen.findByRole('heading', { name: '문제 B' });
+    void mocks.workspaceRuns.get('b')!('python', 'B source');
+    await waitFor(() => expect(mocks.startJob).toHaveBeenCalledWith('b', expect.anything()));
+    await staleRun('python', 'A source');
+    expect(mocks.startJob).toHaveBeenCalledTimes(1);
   });
 });

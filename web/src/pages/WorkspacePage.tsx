@@ -27,7 +27,7 @@ export function WorkspacePage() {
     return () => { if (loadRevision.current === revision) loadRevision.current += 1; };
   }, [id]);
   const run = async (mode: 'run' | 'submit', language: Language, source: string) => {
-    const routeId = id; const operation = ++runOperation.current; const active = () => loadedId.current === routeId && runOperation.current === operation;
+    const routeId = id; if (loadedId.current !== routeId) return; const operation = ++runOperation.current; const active = () => loadedId.current === routeId && runOperation.current === operation;
     setBusy(true); setError(''); setTab('results');
     try {
       const started = await api.startJob(routeId, { mode, language, source }); if (!active()) return; setJob(started);
@@ -41,7 +41,7 @@ export function WorkspacePage() {
     const routeId = id; const operation = ++tutorOperation.current; const active = () => loadedId.current === routeId && tutorOperation.current === operation;
     setTutorBusy(true); setError('');
     try { await api.tutor(routeId, { mode, message, language: current.current.language, source: current.current.source }); if (!active()) return; const history = await api.chat(routeId); if (active()) setTurns(history); }
-    catch (e) { if (active()) { setError((e as Error).message); throw e; } }
+    catch (e) { if (active()) setError((e as Error).message); throw e; }
     finally { if (active()) setTutorBusy(false); }
   };
   const resize = (event: React.PointerEvent) => { const target = event.currentTarget.parentElement!; event.currentTarget.setPointerCapture(event.pointerId); const move = (next: PointerEvent) => { const rect = target.getBoundingClientRect(); setSplit(Math.min(68, Math.max(28, ((next.clientX - rect.left) / rect.width) * 100))); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); };
@@ -56,7 +56,7 @@ export function WorkspacePage() {
         <BottomDock tab={tab} setTab={setTab} problem={problem} job={job} submissions={submissions} busy={busy} reload={reloadProblem} />
       </div>
     </div>
-    <TutorDrawer open={tutorOpen} turns={turns} busy={tutorBusy} onClose={() => setTutorOpen(false)} onSend={tutor} />
+    <TutorDrawer key={id} open={tutorOpen} turns={turns} busy={tutorBusy} onClose={() => setTutorOpen(false)} onSend={tutor} />
   </div>;
 }
 

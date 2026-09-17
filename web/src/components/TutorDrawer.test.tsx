@@ -34,4 +34,18 @@ describe('TutorDrawer', () => {
     await user.click(screen.getByRole('button', { name: '질문 보내기' }));
     expect(screen.getByLabelText('도우미에게 보낼 내용')).toHaveValue('이 입력은 남아야 합니다');
   });
+
+  it('does not clear a new problem draft when the previous request settles', async () => {
+    let finishOld!: () => void;
+    const oldRequest = new Promise<void>((resolve) => { finishOld = resolve; });
+    const user = userEvent.setup();
+    const view = render(<TutorDrawer key="a" open turns={[]} onClose={vi.fn()} onSend={() => oldRequest} busy={false} />);
+    await user.type(screen.getByLabelText('도우미에게 보낼 내용'), 'A 질문');
+    await user.click(screen.getByRole('button', { name: '질문 보내기' }));
+    view.rerender(<TutorDrawer key="b" open turns={[]} onClose={vi.fn()} onSend={vi.fn().mockResolvedValue(undefined)} busy={false} />);
+    await user.type(screen.getByLabelText('도우미에게 보낼 내용'), 'B에서 작성 중');
+    finishOld();
+    await oldRequest; await Promise.resolve();
+    expect(screen.getByLabelText('도우미에게 보낼 내용')).toHaveValue('B에서 작성 중');
+  });
 });
