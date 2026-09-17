@@ -13,11 +13,11 @@ These decisions complete PLAN.md for v1. Root coordinator owns changes to this f
 
 ## Types and invocation
 
-- Language IDs: `python`, `cpp`, `java`.
+- Language IDs: `python`, `cpp`, `java`, `javascript` (user-added fourth language).
 - Type descriptor: `{ "base": "int" | "long" | "string" | "bool", "dimensions": 0 | 1 | 2 }`.
 - Signature: `{ "parameters": [{"name": "numbers", "type": {"base":"int","dimensions":1}}], "return_type": {"base":"int","dimensions":0} }`.
 - Every case `args` is an ordered array of argument values, e.g. `[[1,2,3]]`. int is 32-bit; long is signed 64-bit encoded as decimal STRING at API/storage boundary, including nested arrays. Native wrappers decode/encode. Bool must not compare equal to int.
-- C++ free function solution, Python def solution, Java public class Solution with public instance method solution. Templates derive deterministically from signature.
+- C++ free function solution, Python def solution, Java public class Solution with public instance method solution, JavaScript Node22 plain synchronous function solution. Templates derive deterministically from signature. JavaScript native long is BigInt, recursively string-encoded at JSON boundaries; int is Number restricted to int32.
 - Public problem response excludes reference sources, validation code, hidden cases, raw generator results. Default seeded example is sum of integers with public 3 and hidden cases.
 
 ## Internal runner HTTP interface (authoritative)
@@ -33,7 +33,7 @@ These decisions complete PLAN.md for v1. Root coordinator owns changes to this f
 Response: `{ "results": [{"id":"case-1","status":"ok"|"compile_error"|"runtime_error"|"time_limit"|"memory_limit"|"output_limit"|"system_error", "value":<typed JSON or null>, "stdout":"", "stderr":"", "time_ms":0.0, "memory_kb":0}] }`.
 
 - Expected answers never enter runner. Failure to reach Docker returns service error (503); never fake execution. API client timeout must accommodate per-case work (up to 600s default).
-- Each case starts a clean process/container; compile artifact may be reused for a request. Compile timeout 30s, 1024MB; runtime defaults Python/C++ 2000ms 256MB, Java 4000ms 512MB. pids 64 (Java 128), cpu 1. Caller limits validated and capped. Output bound applies while collecting, not only after completion.
+- Each case starts a clean process/container; compile artifact may be reused for a request. Compile timeout 30s, 1024MB; runtime defaults Python/C++/JavaScript 2000ms 256MB, Java 4000ms 512MB. pids 64 (Java 128), cpu 1. Caller limits validated and capped. Output bound applies while collecting, not only after completion.
 - Bounds: source 256KiB; total request/payload 2MiB; 1..100 unique case IDs; time 50..10000ms, memory 32..1024MB (Java minimum 128), output 1..1024KiB combined stdout+stderr. Reject oversized artifacts above 32MiB. Mid-request Docker transport failure returns whole-request 503.
 - Archive handling: use a restricted writable compile/staging container, copy bounded source archive in, compile, then commit to a temporary job image. Each runtime container derives from that image with read-only root and per-case stdin; cleanup image and containers in finally. Do not rely on put_archive into a read-only container or on tmpfs surviving exit. Compile staging contains no host mounts/secrets/expected values, has network/CPU/PID/memory/time limits, and is removed after image creation.
 - Measure runtime with monotonic clock and Linux peak RSS or container metrics; identify measurements accurately. Cleanup in finally, including kill, failed compile, disconnect/error paths. No secrets, expected values, API keys, docker socket or host directory mounts in sandbox.
