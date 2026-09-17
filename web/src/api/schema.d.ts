@@ -543,6 +543,11 @@ export interface components {
              * @default
              */
             statement: string;
+            /**
+             * Example Explanation
+             * @default
+             */
+            example_explanation: string;
             /** Constraints */
             constraints?: string[];
             signature: components["schemas"]["Signature"];
@@ -569,6 +574,8 @@ export interface components {
             updated_at: string;
             /** Statement */
             statement: string;
+            /** Example Explanation */
+            example_explanation: string;
             /** Constraints */
             constraints: string[];
             signature: components["schemas"]["Signature"];
@@ -612,6 +619,8 @@ export interface components {
             title?: string;
             /** Statement */
             statement?: string;
+            /** Example Explanation */
+            example_explanation?: string;
             /** Constraints */
             constraints?: string[];
             signature?: components["schemas"]["Signature"];

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspacePage } from './WorkspacePage';
@@ -9,7 +9,7 @@ vi.mock('../components/CodeWorkspace', () => ({ CodeWorkspace: ({ problemId, ini
 vi.mock('../components/TutorDrawer', () => ({ TutorDrawer: ({ onSend }: { onSend: (mode: 'hint', message: string) => Promise<void> }) => <button onClick={() => void onSend('hint', '도와줘').catch(() => undefined)}>mock tutor</button> }));
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
-const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [] });
+const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, example_explanation: '', constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [] });
 
 describe('WorkspacePage route identity', () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.workspaceRuns.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
@@ -76,5 +76,44 @@ describe('WorkspacePage route identity', () => {
     await waitFor(() => expect(mocks.startJob).toHaveBeenCalledWith('b', expect.anything()));
     await staleRun('python', 'A source');
     expect(mocks.startJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders ordered problem sections, public examples by parameter name, and GFM explanation', async () => {
+    mocks.problem.mockResolvedValue({ ...makeProblem('a', '두 수 계산'), statement: '두 수를 계산하세요.', constraints: ['각 수는 0 이상입니다.'], example_explanation: '| 경우 | 설명 |\n| --- | --- |\n| 1 | 첫 예시 |', signature: { parameters: [{ name: 'left', type: { base: 'int', dimensions: 0 } }, { name: 'right', type: { base: 'int', dimensions: 0 } }], return_type: { base: 'int', dimensions: 0 } }, tests: [{ id: 'public-1', kind: 'public', position: 0, args: [2, 3], expected: 5, suite_version: 1 }, { id: 'user-1', kind: 'user', position: 1, args: [99, 1], expected: 100, suite_version: 1 }] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '두 수 계산' });
+    const sectionHeadings = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+    expect(sectionHeadings.slice(0, 4)).toEqual(['문제 설명', '제한사항', '입출력 예', '입출력 예 설명']);
+    const examples = screen.getByRole('table', { name: '입출력 예' });
+    expect(within(examples).getByRole('columnheader', { name: 'left' })).toBeInTheDocument();
+    expect(within(examples).getByRole('columnheader', { name: 'right' })).toBeInTheDocument();
+    expect(within(examples).getByRole('columnheader', { name: 'result' })).toBeInTheDocument();
+    expect(within(examples).getByText('2')).toBeInTheDocument();
+    expect(within(examples).queryByText('99')).not.toBeInTheDocument();
+    const tables = screen.getAllByRole('table');
+    expect(tables).toHaveLength(2);
+    expect(within(tables[1]).getByRole('columnheader', { name: '경우' })).toBeInTheDocument();
+    expect(within(tables[1]).getByRole('columnheader', { name: '설명' })).toBeInTheDocument();
+  });
+
+  it('shows an honest state when no example explanation was stored', async () => {
+    mocks.problem.mockResolvedValue(makeProblem('a', '설명 없는 문제'));
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    expect(await screen.findByText('등록된 입출력 예 설명이 없습니다.')).toBeInTheDocument();
+  });
+
+  it('labels logs separately while preserving real newlines and literal backslash-n text', async () => {
+    const stdout = 'first line\nsecond line\n\\n\n'; const stderr = 'error line\n\\n';
+    mocks.problem.mockResolvedValue(makeProblem('a', '로그 문제'));
+    mocks.startJob.mockResolvedValue({ id: 'job', status: 'queued', mode: 'run', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' });
+    mocks.job.mockResolvedValue({ id: 'job', status: 'completed', mode: 'run', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [{ id: 'result', visibility: 'public', status: 'passed', expected: 1, actual: 1, stdout, stderr, time_ms: 1, memory_kb: 1 }] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'mock run' }));
+    const outputLabel = await screen.findByText('출력'); const errorLabel = screen.getByText('오류 출력');
+    expect(outputLabel.parentElement?.querySelector('pre')?.textContent).toBe(stdout);
+    expect(errorLabel.parentElement?.querySelector('pre')?.textContent).toBe(stderr);
   });
 });

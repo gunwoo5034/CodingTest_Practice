@@ -14,3 +14,105 @@
 .pane-toolbar {
   width: 100%;
 }
+
+.problem-section {
+  padding: 0 0 30px;
+  margin: 0 0 30px;
+  border-bottom: 1px solid var(--line);
+}
+
+.problem-section h2 {
+  margin: 0 0 18px;
+  font-size: 19px;
+}
+
+.problem-section:first-child h2 {
+  color: var(--mint);
+  font-size: 12px;
+  letter-spacing: .08em;
+}
+
+.problem-markdown > :first-child {
+  margin-top: 0;
+}
+
+.problem-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.problem-markdown table,
+.example-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.problem-markdown th,
+.problem-markdown td,
+.example-table th,
+.example-table td {
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.problem-markdown th,
+.example-table th {
+  background: #122135;
+  color: #b9c9d9;
+  font-weight: 700;
+}
+
+.problem-markdown td,
+.example-table td {
+  background: #0a1624;
+}
+
+.example-table-wrap {
+  overflow-x: auto;
+}
+
+.example-table code {
+  color: #d8e6f2;
+  white-space: pre-wrap;
+}
+
+.empty-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.function-details {
+  margin-bottom: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.function-details summary {
+  padding: 13px 16px;
+  background: #0e1d2e;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.function-details .signature-card {
+  margin: 12px;
+}
+
+.result-log {
+  grid-column: 1 / -1;
+}
+
+.result-log pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.result-log.stderr span,
+.result-log.stderr pre {
+  color: #ff9aac;
+}
