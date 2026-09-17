@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 
+from server.ai_client import AIUnavailableWithUsage
 from server.models import AIUsage, Job, Problem, TestCase, now
 from server.output_format import build_output_format_wrapper
 from server.runner_client import RunnerUnavailable
@@ -220,6 +221,7 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
         }
     bundle = None
     repair_result = None
+    repair_usage = None
     format_repair_attempted = False
     output_format = None
     try:
@@ -242,18 +244,27 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
             for index, expected in enumerate(original_expected)
         )
         if reference_return_type_error or brute_return_type_error or example_mismatch:
+            if signature.return_type.dimensions != 0 or signature.return_type.base not in {"int", "long", "string"}:
+                raise DomainValidationError(
+                    "이 반환 타입은 출력 표현 자동 보정을 지원하지 않습니다. 예제 또는 문제 설명을 확인한 뒤 다시 준비하세요."
+                )
             format_repair_attempted = True
             repair_examples, examples_truncated = _bounded_repair_examples(public_cases)
-            repair_result = await ai.repair_output_format(
-                {
-                    "signature": problem.signature,
-                    "reference_source": bundle["reference_source"][:120_000],
-                    "brute_source": bundle["brute_source"][:120_000],
-                    "sources_truncated": len(bundle["reference_source"]) > 120_000 or len(bundle["brute_source"]) > 120_000,
-                    "examples": repair_examples,
-                    "examples_truncated": examples_truncated,
-                }
-            )
+            try:
+                repair_result = await ai.repair_output_format(
+                    {
+                        "signature": problem.signature,
+                        "reference_source": bundle["reference_source"][:120_000],
+                        "brute_source": bundle["brute_source"][:120_000],
+                        "sources_truncated": len(bundle["reference_source"]) > 120_000 or len(bundle["brute_source"]) > 120_000,
+                        "examples": repair_examples,
+                        "examples_truncated": examples_truncated,
+                    }
+                )
+                repair_usage = repair_result
+            except AIUnavailableWithUsage as exc:
+                repair_usage = exc.usage
+                raise
             if not isinstance(repair_result, dict):
                 raise DomainValidationError("출력 형식 진단 결과가 없습니다.")
             output_format = repair_result.get("output_format")
@@ -261,8 +272,6 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
                 raise DomainValidationError("지원하지 않는 출력 형식 보정 규칙입니다.")
             if output_format == "none":
                 raise DomainValidationError("공개 예제에 공통인 안전한 출력 형식 보정을 찾지 못했습니다.")
-            if signature.return_type.dimensions != 0:
-                raise DomainValidationError("배열 반환 문제에는 출력 형식 보정을 적용할 수 없습니다.")
             try:
                 bundle["reference_source"] = build_output_format_wrapper(
                     bundle["reference_source"], output_format, signature.return_type.base
@@ -381,8 +390,8 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
             }
             job.finished_at = datetime.now(timezone.utc)
             db.add(AIUsage(problem_id=problem.id, operation="generate", model=bundle["model"], input_tokens=bundle["input_tokens"], output_tokens=bundle["output_tokens"]))
-            if repair_result:
-                db.add(AIUsage(problem_id=problem.id, operation="format_repair", model=repair_result["model"], input_tokens=repair_result["input_tokens"], output_tokens=repair_result["output_tokens"]))
+            if repair_usage:
+                db.add(AIUsage(problem_id=problem.id, operation="format_repair", model=repair_usage["model"], input_tokens=repair_usage["input_tokens"], output_tokens=repair_usage["output_tokens"]))
             db.commit()
     except Exception as exc:
         logger.exception("generation job failed")
@@ -406,6 +415,6 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
                 )
                 if bundle:
                     db.add(AIUsage(problem_id=problem.id, operation="generate", model=bundle["model"], input_tokens=bundle["input_tokens"], output_tokens=bundle["output_tokens"]))
-                if repair_result:
-                    db.add(AIUsage(problem_id=problem.id, operation="format_repair", model=repair_result["model"], input_tokens=repair_result["input_tokens"], output_tokens=repair_result["output_tokens"]))
+                if repair_usage:
+                    db.add(AIUsage(problem_id=problem.id, operation="format_repair", model=repair_usage["model"], input_tokens=repair_usage["input_tokens"], output_tokens=repair_usage["output_tokens"]))
             db.commit()

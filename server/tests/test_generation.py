@@ -4,6 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import threading
 
+import pytest
+
+from server.ai_client import AIUnavailableWithUsage
+
 
 def _script(value):
     return {"status": "ok", "value": value, "stdout": "", "stderr": "", "time_ms": 1, "memory_kb": 100}
@@ -324,6 +328,88 @@ def test_generation_rejects_wrong_values_after_one_format_repair(client, runner,
     assert job["status"] == "failed"
     assert job["error"] == "출력 표현을 보정했지만 공개 예제의 기대값과 일치하지 않습니다. 예제 또는 문제 설명을 확인한 뒤 다시 준비하세요."
     assert [operation for operation, _ in ai.calls].count("format_repair") == 1
+
+
+@pytest.mark.parametrize(
+    ("return_type", "expected", "initial_response"),
+    [
+        ({"base": "bool", "dimensions": 0}, True, _results([False])),
+        ({"base": "int", "dimensions": 1}, [1], _return_type_results(1)),
+    ],
+)
+def test_unsupported_return_target_never_requests_format_repair(
+    client, runner, ai, return_type, expected, initial_response
+):
+    problem = client.post(
+        "/api/problems",
+        json={
+            "title": "지원하지 않는 출력 보정",
+            "signature": {
+                "parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}],
+                "return_type": return_type,
+            },
+        },
+    ).json()
+    client.post(
+        f"/api/problems/{problem['id']}/tests",
+        json={"kind": "public", "args": [1], "expected": expected},
+    )
+    ai.bundle = {
+        "reference_source": "def solution(value): return value",
+        "brute_source": "def solution(value): return value",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "unsupported target",
+        "model": "fake-generation",
+        "input_tokens": 3,
+        "output_tokens": 4,
+    }
+    runner.script_responses.append(_script([True]))
+    runner.execute_responses.extend([initial_response, initial_response])
+
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 50})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+
+    assert job["status"] == "failed"
+    assert [operation for operation, _ in ai.calls] == ["generate"]
+    assert [item["operation"] for item in client.get("/api/ai/usage").json()] == ["generate"]
+
+
+def test_incomplete_format_repair_response_still_records_usage(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return [sum(numbers)]",
+        "brute_source": "def solution(numbers): return [sum(numbers)]",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "incomplete repair response",
+        "model": "fake-generation",
+        "input_tokens": 3,
+        "output_tokens": 4,
+    }
+
+    async def incomplete_repair(payload):
+        ai.calls.append(("format_repair", payload))
+        raise AIUnavailableWithUsage(
+            "AI가 출력 형식 진단을 완성하지 못했습니다.",
+            {"model": "fake-generation", "input_tokens": 8, "output_tokens": 2},
+        )
+
+    ai.repair_output_format = incomplete_repair
+    runner.script_responses.append(_script([True] * 3))
+    runner.execute_responses.extend([_return_type_results(3), _return_type_results(3)])
+
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 51})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    usage = client.get("/api/ai/usage").json()
+
+    assert job["status"] == "failed"
+    assert any(
+        item["operation"] == "format_repair"
+        and item["input_tokens"] == 8
+        and item["output_tokens"] == 2
+        for item in usage
+    )
 
 
 def test_generation_rejects_non_boolean_public_validation(client, runner, ai):

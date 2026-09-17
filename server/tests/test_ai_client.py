@@ -4,13 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from server.ai_client import OpenAIClient
+from server.ai_client import AIUnavailableWithUsage, OpenAIClient
 from server.schemas import AIAnalysisOutput, AIFormatRepairOutput, AIGenerationOutput, AITutorOutput
 
 
 class FakeResponses:
-    def __init__(self, calls):
-        self.calls = calls
+    def __init__(self, owner):
+        self.owner = owner
+        self.calls = owner.calls
 
     async def parse(self, **kwargs):
         self.calls.append(kwargs)
@@ -37,7 +38,7 @@ class FakeResponses:
         else:
             parsed = AITutorOutput(content="답변")
         return SimpleNamespace(
-            output_parsed=parsed,
+            output_parsed=None if schema is AIFormatRepairOutput and self.owner.incomplete_repair else parsed,
             usage=SimpleNamespace(input_tokens=2, output_tokens=3),
             model="fake-model",
         )
@@ -46,7 +47,7 @@ class FakeResponses:
 class FakeSDK:
     def __init__(self, owner):
         self.owner = owner
-        self.responses = FakeResponses(owner.calls)
+        self.responses = FakeResponses(owner)
 
     async def __aenter__(self):
         self.owner.entered += 1
@@ -62,6 +63,7 @@ class FakeFactory:
         self.entered = 0
         self.exited = 0
         self.calls = []
+        self.incomplete_repair = False
 
     def __call__(self, **_kwargs):
         self.created += 1
@@ -118,3 +120,19 @@ async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_con
     assert "solution" in tutor_prompt and "정답 코드" in tutor_prompt
     tutor_payload = factory.calls[3]["input"][1]["content"]
     assert '"mode": "hint"' in tutor_payload
+
+
+@pytest.mark.asyncio
+async def test_incomplete_format_repair_carries_response_usage():
+    factory = FakeFactory()
+    factory.incomplete_repair = True
+    client = OpenAIClient("key", "generation-model", "tutor-model", client_factory=factory)
+
+    with pytest.raises(AIUnavailableWithUsage) as raised:
+        await client.repair_output_format({"signature": {}, "examples": []})
+
+    assert raised.value.usage == {
+        "model": "fake-model",
+        "input_tokens": 2,
+        "output_tokens": 3,
+    }

@@ -13,6 +13,12 @@ class AIUnavailable(RuntimeError):
     pass
 
 
+class AIUnavailableWithUsage(AIUnavailable):
+    def __init__(self, message: str, usage: dict) -> None:
+        super().__init__(message)
+        self.usage = usage
+
+
 def _usage(response) -> dict:
     usage = response.usage
     return {
@@ -125,7 +131,7 @@ class OpenAIClient:
         except OpenAIError as exc:
             raise AIUnavailable("OpenAI 출력 형식 진단 요청에 실패했습니다.") from exc
         if response.output_parsed is None:
-            raise AIUnavailable("AI가 출력 형식 진단을 완성하지 못했습니다.")
+            raise AIUnavailableWithUsage("AI가 출력 형식 진단을 완성하지 못했습니다.", _usage(response))
         return {**response.output_parsed.model_dump(), **_usage(response)}
 
     async def tutor(self, payload: dict) -> dict:
