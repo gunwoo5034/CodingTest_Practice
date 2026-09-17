@@ -63,3 +63,9 @@ pytest meaningful backend and runner tests; generated wrappers tested on origina
 ## Integration clarification: manually entered public examples
 
 `TestCaseCreate` adds optional `kind: "public" | "user"` (default `"user"`). The existing test-create route accepts only these visible kinds. Problem setup uses `"public"` to register original examples after manual entry; the workspace custom-case editor omits it or uses `"user"`. Hidden test creation stays internal to validated generation. All visible writes share constraint validation, generation edit locks, and revision semantics.
+
+## Problem sections and example explanation
+
+`Problem.example_explanation` is Markdown text (default empty, maximum 100,000 characters), accepted by create/update and returned by problem detail. Explicit null in updates is rejected. Changes follow statement semantic invalidation and revision rules. AI analysis extracts explanations from the source into this field; absent explanations remain empty. Generation and tutor context include this problem content. Existing SQLite databases receive an additive non-null text column with an empty default; no problem or submission data is reset.
+
+The statement pane shows 문제 설명, 제한사항, 입출력 예, 입출력 예 설명 in order. The example table includes public cases only, with signature parameter names and a `result` column. User-added tests remain in the test panel. Stdout/stderr labels are separate from raw log text so real newlines and user-authored literal backslashes are both preserved.
