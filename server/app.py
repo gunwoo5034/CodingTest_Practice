@@ -8,13 +8,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from server.ai_client import AIUnavailable, OpenAIClient
 from server.config import Settings, get_settings
 from server.db import create_database, initialize_database, session_dependency
-from server.models import AIUsage, ChatTurn, CodeDraft, Job, Problem, TestCase
+from server.models import AIUsage, ChatTurn, CodeDraft, Job, Problem, TestCase, now
 from server.runner_client import RunnerClient, RunnerUnavailable
 from server.schemas import (
     AIUsagePublic,
@@ -193,6 +193,24 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         except DomainValidationError as exc:
             raise _domain_http(exc)
 
+    def claim_test_revision(db: Session, problem: Problem) -> int:
+        next_revision = problem.test_revision + 1
+        result = db.execute(
+            update(Problem)
+            .where(
+                Problem.id == problem.id,
+                Problem.test_revision == problem.test_revision,
+                Problem.status == problem.status,
+                Problem.status != "generating",
+            )
+            .values(test_revision=next_revision, updated_at=now())
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "문제가 변경되었습니다. 최신 상태를 불러온 뒤 다시 시도하세요.")
+        return next_revision
+
     def schedule(coro):
         async def run_serially():
             async with app.state.worker_lock:
@@ -282,7 +300,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             source_image=image,
             source_image_mime=payload.image_mime,
             status="analyzed",
-            original_examples=[example.model_dump() for example in parsed_examples],
+            original_examples=[{"args": example.args, "expected": example.expected} for example in parsed_examples],
         )
         db.add(problem)
         db.flush()
@@ -302,30 +320,60 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         problem = _problem_or_404(db, problem_id)
         _ensure_editable(problem)
         updates = payload.model_dump(exclude_unset=True)
-        semantic = any(key in updates for key in {"statement", "constraints", "signature"})
-        for key, value in updates.items():
-            if key == "signature":
-                signature = Signature.model_validate(value)
-                problem.signature = signature.model_dump()
-                problem.templates = templates_for(signature)
-            else:
-                setattr(problem, key, value)
+        semantic = any(
+            key in updates and updates[key] != getattr(problem, key)
+            for key in {"statement", "constraints", "signature"}
+        )
+        values = dict(updates)
+        signature = None
+        if "signature" in values:
+            signature = Signature.model_validate(values["signature"])
+            values["signature"] = signature.model_dump()
+            values["templates"] = templates_for(signature)
         if semantic:
-            problem.status = "draft"
-            problem.reference_source = None
-            problem.brute_source = None
-            problem.validator_source = None
-            problem.generator_source = None
-            problem.generation_meta = None
+            values.update(
+                status="draft",
+                reference_source=None,
+                brute_source=None,
+                validator_source=None,
+                generator_source=None,
+                generation_meta=None,
+                test_revision=problem.test_revision + 1,
+            )
+        values["updated_at"] = now()
+        result = db.execute(
+            update(Problem)
+            .where(
+                Problem.id == problem.id,
+                Problem.test_revision == problem.test_revision,
+                Problem.status == problem.status,
+                Problem.status != "generating",
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "문제가 변경되었습니다. 최신 상태를 불러온 뒤 다시 시도하세요.")
         db.commit()
-        db.refresh(problem)
-        return _problem_public(problem)
+        db.expire_all()
+        return _problem_public(_problem_or_404(db, problem_id))
 
     @app.delete("/api/problems/{problem_id}", status_code=204, tags=["problems"])
     def delete_problem(problem_id: str, db: Session = Depends(get_db)):
         problem = _problem_or_404(db, problem_id)
         _ensure_editable(problem)
-        db.delete(problem)
+        removed = db.execute(
+            delete(Problem).where(
+                Problem.id == problem.id,
+                Problem.test_revision == problem.test_revision,
+                Problem.status == problem.status,
+                Problem.status != "generating",
+            )
+        )
+        if removed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "문제가 변경되었습니다. 최신 상태를 불러온 뒤 다시 시도하세요.")
         db.commit()
         return Response(status_code=204)
 
@@ -338,9 +386,10 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         except DomainValidationError as exc:
             raise _domain_http(exc)
         await validate_constraints(problem, payload.args)
-        problem.test_revision += 1
+        next_revision = claim_test_revision(db, problem)
         position = max((item.position for item in problem.tests), default=-1) + 1
-        item = TestCase(problem_id=problem.id, kind="user", position=position, args=payload.args, expected=payload.expected, suite_version=problem.test_revision, provenance={"source": "manual"})
+        provenance = {"source": "manual-public" if payload.kind == "public" else "manual"}
+        item = TestCase(problem_id=problem.id, kind=payload.kind, position=position, args=payload.args, expected=payload.expected, suite_version=next_revision, provenance=provenance)
         db.add(item)
         db.commit()
         db.refresh(item)
@@ -360,10 +409,10 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         except DomainValidationError as exc:
             raise _domain_http(exc)
         await validate_constraints(problem, args)
-        problem.test_revision += 1
+        next_revision = claim_test_revision(db, problem)
         item.args = args
         item.expected = expected
-        item.suite_version = problem.test_revision
+        item.suite_version = next_revision
         db.commit()
         db.refresh(item)
         return _test_public(item)
@@ -375,7 +424,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         item = db.get(TestCase, test_id)
         if not item or item.problem_id != problem.id or item.kind == "hidden":
             raise HTTPException(404, "테스트를 찾을 수 없습니다.")
-        problem.test_revision += 1
+        claim_test_revision(db, problem)
         db.delete(item)
         db.commit()
         return Response(status_code=204)
@@ -478,14 +527,30 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         public_cases = sorted((item for item in problem.tests if item.kind == "public"), key=lambda item: item.position)
         if not public_cases:
             raise HTTPException(409, "원본 공개 예제가 하나 이상 필요합니다.")
-        visible_cases = _visible_tests(problem)
-        snapshot = [{"id": item.id, "kind": item.kind, "args": item.args, "expected": item.expected} for item in visible_cases]
-        job = Job(problem_id=problem.id, kind="generation", status="queued", test_revision=problem.test_revision, signature_snapshot=problem.signature, cases_snapshot=snapshot)
-        problem.status = "generating"
-        problem.generation_error = None
+        start_revision = problem.test_revision
+        job = Job(problem_id=problem.id, kind="generation", status="queued", test_revision=start_revision, signature_snapshot=problem.signature, cases_snapshot=[])
         db.add(job)
         db.flush()
-        problem.latest_generation_job_id = job.id
+        claimed = db.execute(
+            update(Problem)
+            .where(
+                Problem.id == problem.id,
+                Problem.test_revision == start_revision,
+                Problem.status == problem.status,
+                Problem.status != "generating",
+            )
+            .values(status="generating", generation_error=None, latest_generation_job_id=job.id, updated_at=now())
+            .execution_options(synchronize_session=False)
+        )
+        if claimed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "문제가 변경되었습니다. 최신 상태를 불러온 뒤 다시 시도하세요.")
+        visible_cases = db.scalars(
+            select(TestCase)
+            .where(TestCase.problem_id == problem.id, TestCase.kind.in_(["public", "user"]))
+            .order_by(TestCase.position, TestCase.id)
+        ).all()
+        job.cases_snapshot = [{"id": item.id, "kind": item.kind, "args": item.args, "expected": item.expected} for item in visible_cases]
         db.commit()
         db.refresh(job)
         job_id = job.id

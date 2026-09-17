@@ -79,7 +79,22 @@ async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_con
     generation_prompt = factory.calls[1]["input"][0]["content"]
     assert "examples_json" in analysis_prompt
     assert "10진 문자열" in analysis_prompt
+    assert '"parameters"' in analysis_prompt
+    assert '"name"' in analysis_prompt
+    assert '"base"' in analysis_prompt
+    assert '"dimensions"' in analysis_prompt
+    assert "지원하지 않는" in analysis_prompt
+    assert "추측" in analysis_prompt
     assert "seed/count/mode" in generation_prompt
     assert "정확한 bool 목록" in generation_prompt
     assert "10진 문자열" in generation_prompt
+    assert "독립" in generation_prompt
+    assert "경계" in generation_prompt
     assert all(call["store"] is False for call in factory.calls)
+
+    tutor_prompt = factory.calls[2]["input"][0]["content"]
+    assert "hint" in tutor_prompt and "단계" in tutor_prompt
+    assert "question" in tutor_prompt and "전체 풀이" in tutor_prompt
+    assert "solution" in tutor_prompt and "정답 코드" in tutor_prompt
+    tutor_payload = factory.calls[2]["input"][1]["content"]
+    assert '"mode": "hint"' in tutor_payload

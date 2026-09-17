@@ -1773,79 +1773,37 @@
       "ProblemUpdate": {
         "properties": {
           "title": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Title"
           },
           "statement": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100000
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 100000,
             "title": "Statement"
           },
           "constraints": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "maxItems": 100
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
             "title": "Constraints"
           },
           "signature": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Signature"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/Signature"
           },
           "time_limit_ms": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 10000.0,
-                "minimum": 100.0
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 100.0,
             "title": "Time Limit Ms"
           },
           "memory_limit_mb": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1024.0,
-                "minimum": 32.0
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "maximum": 1024.0,
+            "minimum": 32.0,
             "title": "Memory Limit Mb"
           }
         },
@@ -1876,6 +1834,15 @@
       },
       "TestCaseCreate": {
         "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "public",
+              "user"
+            ],
+            "title": "Kind",
+            "default": "user"
+          },
           "args": {
             "items": {},
             "type": "array",

@@ -1,13 +1,30 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 
 Language = Literal["python", "cpp", "java", "javascript"]
 BaseType = Literal["int", "long", "string", "bool"]
+
+
+def _as_utc(value):
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+UTCDateTime = Annotated[datetime, BeforeValidator(_as_utc)]
+OmittableTitle = Annotated[str, Field(min_length=1, max_length=200)] | SkipJsonSchema[None]
+OmittableStatement = Annotated[str, Field(max_length=100_000)] | SkipJsonSchema[None]
+OmittableConstraints = Annotated[list[str], Field(max_length=100)] | SkipJsonSchema[None]
+OmittableTimeLimit = Annotated[int, Field(ge=100, le=10_000)] | SkipJsonSchema[None]
+OmittableMemoryLimit = Annotated[int, Field(ge=32, le=1024)] | SkipJsonSchema[None]
 
 
 class TypeDescriptor(BaseModel):
@@ -46,7 +63,7 @@ class ProblemSummary(BaseModel):
     title: str
     status: Literal["draft", "analyzed", "generating", "ready", "needs_review"]
     test_revision: int
-    updated_at: datetime
+    updated_at: UTCDateTime
 
 
 class ProblemPublic(ProblemSummary):
@@ -70,12 +87,12 @@ class ProblemCreate(BaseModel):
 
 
 class ProblemUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=200)
-    statement: str | None = Field(default=None, max_length=100_000)
-    constraints: list[str] | None = Field(default=None, max_length=100)
-    signature: Signature | None = None
-    time_limit_ms: int | None = Field(default=None, ge=100, le=10_000)
-    memory_limit_mb: int | None = Field(default=None, ge=32, le=1024)
+    title: OmittableTitle = None
+    statement: OmittableStatement = None
+    constraints: OmittableConstraints = None
+    signature: Signature | SkipJsonSchema[None] = None
+    time_limit_ms: OmittableTimeLimit = None
+    memory_limit_mb: OmittableMemoryLimit = None
 
     @model_validator(mode="before")
     @classmethod
@@ -88,6 +105,7 @@ class ProblemUpdate(BaseModel):
 
 
 class TestCaseCreate(BaseModel):
+    kind: Literal["public", "user"] = "user"
     args: list[Any]
     expected: Any
 
@@ -104,7 +122,7 @@ class DraftWrite(BaseModel):
 class DraftPublic(BaseModel):
     language: Language
     source: str
-    updated_at: datetime
+    updated_at: UTCDateTime
 
 
 class JobCreate(BaseModel):
@@ -152,8 +170,8 @@ class JobPublic(BaseModel):
     results: list[VisibleResult | HiddenResult] = Field(default_factory=list)
     summary: ExecutionSummary | None = None
     error: str | None = None
-    created_at: datetime
-    finished_at: datetime | None = None
+    created_at: UTCDateTime
+    finished_at: UTCDateTime | None = None
 
 
 class ExpectedCompute(BaseModel):
@@ -193,8 +211,8 @@ class GenerationJobPublic(BaseModel):
     test_revision: int
     summary: GenerationSummary | None = None
     error: str | None = None
-    created_at: datetime
-    finished_at: datetime | None = None
+    created_at: UTCDateTime
+    finished_at: UTCDateTime | None = None
 
 
 class TutorRequest(BaseModel):
@@ -218,7 +236,7 @@ class ChatTurnPublic(BaseModel):
     model: str
     input_tokens: int
     output_tokens: int
-    created_at: datetime
+    created_at: UTCDateTime
 
 
 class AIUsagePublic(BaseModel):
@@ -226,7 +244,7 @@ class AIUsagePublic(BaseModel):
     model: str
     input_tokens: int
     output_tokens: int
-    created_at: datetime
+    created_at: UTCDateTime
 
 
 class HealthPublic(BaseModel):

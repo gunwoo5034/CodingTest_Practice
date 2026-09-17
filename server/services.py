@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 
-from server.models import AIUsage, Job, Problem, TestCase
+from server.models import AIUsage, Job, Problem, TestCase, now
 from server.runner_client import RunnerUnavailable
 from server.schemas import Signature
 from server.validation import DomainValidationError, require_all_true, typed_equal, validate_args, validate_case
@@ -216,22 +217,36 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
         with factory() as db:
             job = db.get(Job, job_id)
             problem = db.get(Problem, job.problem_id)
-            next_revision = problem.test_revision + 1
+            next_revision = job.test_revision + 1
+            installed = db.execute(
+                update(Problem)
+                .where(
+                    Problem.id == problem.id,
+                    Problem.status == "generating",
+                    Problem.latest_generation_job_id == job.id,
+                    Problem.test_revision == job.test_revision,
+                )
+                .values(
+                    reference_source=bundle["reference_source"],
+                    brute_source=bundle["brute_source"],
+                    validator_source=bundle["validator_source"],
+                    generator_source=bundle["generator_source"],
+                    generation_meta={"seed": seed, "model": bundle["model"], "notes": bundle["notes"], "small_crosscheck_count": 50, "hidden_count": len(final_hidden)},
+                    test_revision=next_revision,
+                    status="ready",
+                    generation_error=None,
+                    updated_at=now(),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if installed.rowcount != 1:
+                raise DomainValidationError("생성 중 문제가 변경되어 결과를 설치하지 않았습니다.")
             db.query(TestCase).filter(TestCase.problem_id == problem.id, TestCase.kind.in_(["public", "hidden"])).delete(synchronize_session=False)
             for position, item in enumerate(final_public):
                 provenance = item.get("provenance") or {"source": "original"}
                 db.add(TestCase(problem_id=problem.id, kind="public", position=position, args=item["args"], expected=item["expected"], suite_version=next_revision, provenance=provenance))
             for offset, (args, expected) in enumerate(final_hidden):
                 db.add(TestCase(problem_id=problem.id, kind="hidden", position=len(final_public) + offset, args=args, expected=expected, suite_version=next_revision, provenance={"source": "generated", "seed": seed}))
-            problem.reference_source = bundle["reference_source"]
-            problem.brute_source = bundle["brute_source"]
-            problem.validator_source = bundle["validator_source"]
-            problem.generator_source = bundle["generator_source"]
-            problem.generation_meta = {"seed": seed, "model": bundle["model"], "notes": bundle["notes"], "small_crosscheck_count": 50, "hidden_count": len(final_hidden)}
-            problem.test_revision = next_revision
-            problem.status = "ready"
-            problem.latest_generation_job_id = job.id
-            problem.generation_error = None
             job.test_revision = next_revision
             job.status = "completed"
             job.summary = {"small_crosscheck_count": 50, "hidden_count": len(final_hidden), "model": bundle["model"]}
@@ -248,9 +263,16 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
                 job.error = _safe_error(exc)
                 job.finished_at = datetime.now(timezone.utc)
             if problem:
-                problem.status = "needs_review"
-                problem.latest_generation_job_id = job.id if job else problem.latest_generation_job_id
-                problem.generation_error = _safe_error(exc)
+                db.execute(
+                    update(Problem)
+                    .where(
+                        Problem.id == problem.id,
+                        Problem.status == "generating",
+                        Problem.latest_generation_job_id == job.id,
+                    )
+                    .values(status="needs_review", generation_error=_safe_error(exc), updated_at=now())
+                    .execution_options(synchronize_session=False)
+                )
                 if bundle:
                     db.add(AIUsage(problem_id=problem.id, operation="generate", model=bundle["model"], input_tokens=bundle["input_tokens"], output_tokens=bundle["output_tokens"]))
             db.commit()
