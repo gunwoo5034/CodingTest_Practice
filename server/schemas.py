@@ -22,6 +22,7 @@ def _as_utc(value):
 UTCDateTime = Annotated[datetime, BeforeValidator(_as_utc)]
 OmittableTitle = Annotated[str, Field(min_length=1, max_length=200)] | SkipJsonSchema[None]
 OmittableStatement = Annotated[str, Field(max_length=100_000)] | SkipJsonSchema[None]
+OmittableExampleExplanation = Annotated[str, Field(max_length=100_000)] | SkipJsonSchema[None]
 OmittableConstraints = Annotated[list[str], Field(max_length=100)] | SkipJsonSchema[None]
 OmittableTimeLimit = Annotated[int, Field(ge=100, le=10_000)] | SkipJsonSchema[None]
 OmittableMemoryLimit = Annotated[int, Field(ge=32, le=1024)] | SkipJsonSchema[None]
@@ -68,6 +69,7 @@ class ProblemSummary(BaseModel):
 
 class ProblemPublic(ProblemSummary):
     statement: str
+    example_explanation: str = Field(max_length=100_000)
     constraints: list[str]
     signature: Signature
     templates: dict[Language, str]
@@ -81,6 +83,7 @@ class ProblemPublic(ProblemSummary):
 class ProblemCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     statement: str = Field(default="", max_length=100_000)
+    example_explanation: str = Field(default="", max_length=100_000)
     constraints: list[str] = Field(default_factory=list, max_length=100)
     signature: Signature
     source_text: str | None = Field(default=None, max_length=100_000)
@@ -89,6 +92,7 @@ class ProblemCreate(BaseModel):
 class ProblemUpdate(BaseModel):
     title: OmittableTitle = None
     statement: OmittableStatement = None
+    example_explanation: OmittableExampleExplanation = None
     constraints: OmittableConstraints = None
     signature: Signature | SkipJsonSchema[None] = None
     time_limit_ms: OmittableTimeLimit = None
@@ -261,6 +265,7 @@ class HealthPublic(BaseModel):
 class AIAnalysisOutput(BaseModel):
     title: str
     statement: str
+    example_explanation: str = Field(max_length=100_000)
     constraints: list[str]
     signature_json: str
     examples_json: str

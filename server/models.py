@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -26,6 +26,7 @@ class Problem(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     title: Mapped[str] = mapped_column(String(200))
     statement: Mapped[str] = mapped_column(Text, default="")
+    example_explanation: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
     constraints: Mapped[list[str]] = mapped_column(JSON, default=list)
     signature: Mapped[dict] = mapped_column(JSON)
     templates: Mapped[dict] = mapped_column(JSON, default=dict)

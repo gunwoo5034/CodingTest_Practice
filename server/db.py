@@ -41,6 +41,7 @@ def create_database(url: str):
 
 def initialize_database(engine, session_factory: sessionmaker[Session]) -> None:
     Base.metadata.create_all(engine)
+    _migrate_sqlite(engine)
     with session_factory() as db:
         interrupted_generations = db.scalars(
             select(Job).where(Job.kind == "generation", Job.status.in_(["queued", "running"]))
@@ -58,6 +59,18 @@ def initialize_database(engine, session_factory: sessionmaker[Session]) -> None:
             _seed_demo(db)
         _upgrade_templates(db)
         db.commit()
+
+
+def _migrate_sqlite(engine) -> None:
+    """Apply small additive migrations before any ORM query loads legacy rows."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(problems)")}
+        if "example_explanation" not in columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE problems ADD COLUMN example_explanation TEXT NOT NULL DEFAULT ''"
+            )
 
 
 def _upgrade_templates(db: Session) -> None:
@@ -87,6 +100,11 @@ def _seed_demo(db: Session) -> None:
     problem = Problem(
         title="정수 배열의 합",
         statement="정수 배열 numbers가 주어지면 모든 원소의 합을 반환하세요.",
+        example_explanation=(
+            "첫 번째 예시는 `1 + 2 + 3 = 6`입니다.\n\n"
+            "두 번째 예시는 빈 배열이므로 합이 `0`입니다.\n\n"
+            "세 번째 예시는 `5 + (-2) + 9 = 12`입니다."
+        ),
         constraints=["0 ≤ numbers의 길이 ≤ 100", "-1,000 ≤ 각 원소 ≤ 1,000"],
         signature=signature,
         templates={

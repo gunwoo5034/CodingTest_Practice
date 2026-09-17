@@ -51,6 +51,8 @@ class OpenAIClient:
                                 "지원 타입은 int,long,string,bool 및 2차원 이하 배열입니다. 지원하지 않는 그 밖의 타입, 실수 오차, 다중 정답, 표준 입출력 문제라면 지원되는 문제인 것처럼 변환하지 말고 응답을 거부하세요. "
                                 "signature_json은 정확히 {\"parameters\":[{\"name\":\"numbers\",\"type\":{\"base\":\"int\",\"dimensions\":1}}],\"return_type\":{\"base\":\"int\",\"dimensions\":0}} 형태의 JSON 문자열이어야 합니다. "
                                 "각 parameter에는 name과 type이 필요하고, type에는 base와 dimensions가 필요합니다. examples_json은 [{\"args\": [...], \"expected\": 값}] 배열 JSON 문자열이어야 합니다. "
+                                "statement에는 문제 본문만 넣고 제한사항, 입출력 예 표, 입출력 예 설명을 중복해서 넣지 마세요. constraints에는 제한사항만, examples_json에는 입출력 예 표의 입력과 결과만 넣으세요. "
+                                "example_explanation에는 원문에 명시된 입출력 예 설명만 Markdown으로 옮기세요. 해설이 없으면 빈 문자열을 반환하고 새 해설을 만들지 마세요. "
                                 "long은 API 경계에서 배열 내부까지 정규 10진 문자열로 표현하고, int와 bool을 구분하세요. JSON 문자열 필드는 유효한 JSON만 반환하세요."
                             ),
                         },

@@ -29,6 +29,7 @@ def test_tutor_context_excludes_hidden_and_reference(client, ai):
     assert "hidden" not in serialized
     assert "reference" not in serialized
     assert len(payload["history"]) <= 6
+    assert payload["problem"]["example_explanation"]
 
     history = client.get(f"/api/problems/{problem['id']}/chat").json()
     assert history == [
@@ -42,3 +43,31 @@ def test_tutor_context_excludes_hidden_and_reference(client, ai):
             "created_at": history[0]["created_at"],
         }
     ]
+
+
+def test_analysis_saves_example_explanation_and_legacy_fake_defaults_empty(client, ai):
+    base = {
+        "title": "분석 문제",
+        "statement": "두 수를 더해 반환하세요.",
+        "constraints": ["두 수는 정수입니다."],
+        "signature": {
+            "parameters": [
+                {"name": "a", "type": {"base": "int", "dimensions": 0}},
+                {"name": "b", "type": {"base": "int", "dimensions": 0}},
+            ],
+            "return_type": {"base": "int", "dimensions": 0},
+        },
+        "examples": [{"args": [1, 2], "expected": 3}],
+        "model": "fake-analysis",
+        "input_tokens": 10,
+        "output_tokens": 20,
+    }
+    ai.analysis = {**base, "example_explanation": "1과 2를 더하면 3입니다."}
+    analyzed = client.post("/api/problems/analyze", json={"text": "원문"})
+    assert analyzed.status_code == 201
+    assert analyzed.json()["example_explanation"] == "1과 2를 더하면 3입니다."
+
+    ai.analysis = base
+    legacy = client.post("/api/problems/analyze", json={"text": "다른 원문"})
+    assert legacy.status_code == 201
+    assert legacy.json()["example_explanation"] == ""

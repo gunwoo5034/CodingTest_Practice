@@ -88,6 +88,7 @@ def _problem_public(problem: Problem) -> ProblemPublic:
     return ProblemPublic(
         **_problem_summary(problem).model_dump(),
         statement=problem.statement,
+        example_explanation=problem.example_explanation,
         constraints=problem.constraints,
         signature=problem.signature,
         templates=problem.templates,
@@ -252,6 +253,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         problem = Problem(
             title=payload.title,
             statement=payload.statement,
+            example_explanation=payload.example_explanation,
             constraints=payload.constraints,
             signature=signature.model_dump(),
             templates=templates_for(signature),
@@ -286,6 +288,9 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             parsed_examples = [TestCaseCreate.model_validate(item) for item in examples]
             for example in parsed_examples:
                 validate_case(example.args, example.expected, signature)
+            example_explanation = result.get("example_explanation", "")
+            if not isinstance(example_explanation, str) or len(example_explanation) > 100_000:
+                raise ValueError("입출력 예 설명이 올바르지 않습니다.")
         except AIUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
         except (ValueError, TypeError, json.JSONDecodeError, DomainValidationError) as exc:
@@ -293,6 +298,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         problem = Problem(
             title=result["title"],
             statement=result["statement"],
+            example_explanation=example_explanation,
             constraints=result["constraints"],
             signature=signature.model_dump(),
             templates=templates_for(signature),
@@ -322,7 +328,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         updates = payload.model_dump(exclude_unset=True)
         semantic = any(
             key in updates and updates[key] != getattr(problem, key)
-            for key in {"statement", "constraints", "signature"}
+            for key in {"statement", "example_explanation", "constraints", "signature"}
         )
         values = dict(updates)
         signature = None
@@ -580,7 +586,7 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             "message": payload.message,
             "language": payload.language,
             "source": payload.source,
-            "problem": {"title": problem.title, "statement": problem.statement, "constraints": problem.constraints, "signature": problem.signature, "examples": [{"args": item.args, "expected": item.expected} for item in _visible_tests(problem)]},
+            "problem": {"title": problem.title, "statement": problem.statement, "example_explanation": problem.example_explanation, "constraints": problem.constraints, "signature": problem.signature, "examples": [{"args": item.args, "expected": item.expected} for item in _visible_tests(problem)]},
             "history": history,
         }
         try:

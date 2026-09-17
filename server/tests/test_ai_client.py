@@ -19,6 +19,7 @@ class FakeResponses:
             parsed = schema(
                 title="문제",
                 statement="설명",
+                example_explanation="1을 입력하면 1입니다.",
                 constraints=[],
                 signature_json='{"parameters":[{"name":"a","type":{"base":"long","dimensions":0}}],"return_type":{"base":"long","dimensions":0}}',
                 examples_json='[{"args":["1"],"expected":"1"}]',
@@ -85,6 +86,9 @@ async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_con
     assert '"dimensions"' in analysis_prompt
     assert "지원하지 않는" in analysis_prompt
     assert "추측" in analysis_prompt
+    assert "example_explanation" in analysis_prompt
+    assert "statement에는 문제 본문만" in analysis_prompt
+    assert "해설이 없으면 빈 문자열" in analysis_prompt
     assert "seed/count/mode" in generation_prompt
     assert "정확한 bool 목록" in generation_prompt
     assert "10진 문자열" in generation_prompt

@@ -29,6 +29,40 @@ def test_semantic_edit_invalidates_generated_material(client):
     assert response.json()["status"] == "draft"
 
 
+def test_example_explanation_roundtrip_and_semantic_invalidation(client):
+    summary = client.get("/api/problems").json()[0]
+    problem = client.get(f"/api/problems/{summary['id']}").json()
+    before_revision = problem["test_revision"]
+    assert problem["example_explanation"]
+    response = client.patch(
+        f"/api/problems/{problem['id']}",
+        json={"example_explanation": "첫 예시는 `1 + 2 + 3 = 6`입니다."},
+    )
+    assert response.status_code == 200
+    assert response.json()["example_explanation"] == "첫 예시는 `1 + 2 + 3 = 6`입니다."
+    assert response.json()["status"] == "draft"
+    assert response.json()["test_revision"] == before_revision + 1
+    assert client.patch(
+        f"/api/problems/{problem['id']}", json={"example_explanation": None}
+    ).status_code == 422
+
+    created = client.post(
+        "/api/problems",
+        json={
+            "title": "설명 필드",
+            "statement": "본문",
+            "example_explanation": "예시 해설",
+            "constraints": [],
+            "signature": {
+                "parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}],
+                "return_type": {"base": "int", "dimensions": 0},
+            },
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["example_explanation"] == "예시 해설"
+
+
 def test_title_or_unchanged_semantic_fields_keep_ready_status(client):
     problem = client.get("/api/problems").json()[0]
     detail = client.get(f"/api/problems/{problem['id']}").json()

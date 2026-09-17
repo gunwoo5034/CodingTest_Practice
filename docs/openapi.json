@@ -1584,6 +1584,12 @@
             "title": "Statement",
             "default": ""
           },
+          "example_explanation": {
+            "type": "string",
+            "maxLength": 100000,
+            "title": "Example Explanation",
+            "default": ""
+          },
           "constraints": {
             "items": {
               "type": "string"
@@ -1648,6 +1654,11 @@
           "statement": {
             "type": "string",
             "title": "Statement"
+          },
+          "example_explanation": {
+            "type": "string",
+            "maxLength": 100000,
+            "title": "Example Explanation"
           },
           "constraints": {
             "items": {
@@ -1720,6 +1731,7 @@
           "test_revision",
           "updated_at",
           "statement",
+          "example_explanation",
           "constraints",
           "signature",
           "templates",
@@ -1782,6 +1794,11 @@
             "type": "string",
             "maxLength": 100000,
             "title": "Statement"
+          },
+          "example_explanation": {
+            "type": "string",
+            "maxLength": 100000,
+            "title": "Example Explanation"
           },
           "constraints": {
             "items": {

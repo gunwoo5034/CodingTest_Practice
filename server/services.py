@@ -159,6 +159,7 @@ async def generate_job(factory: sessionmaker[Session], runner, ai, job_id: str, 
         ai_payload = {
             "title": problem.title,
             "statement": problem.statement,
+            "example_explanation": problem.example_explanation,
             "constraints": problem.constraints,
             "signature": problem.signature,
             "examples": [{"args": item["args"], "expected": item["expected"]} for item in public_cases],

@@ -65,6 +65,8 @@ def test_generation_crosschecks_and_atomically_installs_tests(client, runner, ai
     assert len(updated["tests"]) == 4
     assert all("expected" not in call for call in runner.execute_calls)
     assert runner.script_calls[1]["payload"] == [[[1, 2, 3]], [[]], [[5, -2, 9]], [[10]]]
+    generation_payload = next(payload for operation, payload in ai.calls if operation == "generate")
+    assert generation_payload["example_explanation"]
 
 
 def test_expected_value_is_computed_locally_without_overwriting(client, runner, ai):
