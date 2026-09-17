@@ -184,6 +184,21 @@ def test_java_heap_exhaustion_is_memory_limit(runner):
     assert "OutOfMemoryError" in result["stderr"]
 
 
+def test_java_literal_oom_log_with_runtime_exception_is_runtime_error(runner):
+    request = ExecuteRequest.model_validate(
+        {
+            "language": "java",
+            "source": 'public class Solution { public int solution(int value) { System.err.println("java.lang.OutOfMemoryError"); throw new RuntimeException("ordinary failure"); } }',
+            "signature": {"parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}], "return_type": {"base": "int", "dimensions": 0}},
+            "cases": [{"id": "ordinary-runtime-error", "args": [1]}],
+            "limits": {"time_ms": 4000, "memory_mb": 128, "output_kb": 64},
+        }
+    )
+    result = runner.execute(request)["results"][0]
+    assert result["status"] == "runtime_error"
+    assert "ordinary failure" in result["stderr"]
+
+
 def test_large_unread_stdin_cannot_block_wall_deadline(runner):
     request = ExecuteRequest.model_validate(
         {

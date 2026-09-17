@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tarfile
 
 import pytest
@@ -69,6 +70,24 @@ def test_private_result_frame_has_an_independent_size_limit():
 )
 def test_exit_classification_has_deterministic_priority(trigger, oom, exit_code, has_control, expected):
     assert classify_exit(trigger=trigger, oom_killed=oom, exit_code=exit_code, has_control=has_control) == expected
+
+
+@pytest.mark.parametrize(
+    ("manager_status", "expected"),
+    [
+        ("runtime_error", "memory_limit"),
+        ("output_limit", "output_limit"),
+        ("time_limit", "time_limit"),
+        ("memory_limit", "memory_limit"),
+    ],
+)
+def test_manager_limits_take_priority_over_harness_memory_signal(manager_status, expected):
+    control = json.dumps({"failure": "memory_limit"}).encode()
+    outcome = MonitoredRun(manager_status, b"", b"", 1, manager_status == "memory_limit", 1.0, control)
+
+    result = DockerRunner()._outcome_result((outcome, "token"), None)
+
+    assert result["status"] == expected
 
 
 def test_runtime_container_has_no_mounts_or_network_and_uses_read_only_root():

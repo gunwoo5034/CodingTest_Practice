@@ -332,8 +332,6 @@ class DockerRunner:
                 stdin=payload,
                 control_token=token,
             )
-            if command and command[0] == "java" and outcome.status == "runtime_error" and b"java.lang.OutOfMemoryError" in outcome.stderr:
-                outcome.status = "memory_limit"
             return outcome, token
         finally:
             if container is not None:
@@ -451,6 +449,8 @@ class DockerRunner:
         stdout, stderr = outcome.stdout, outcome.stderr
         if outcome.status in {"output_limit", "time_limit", "memory_limit"}:
             status = outcome.status
+        elif isinstance(control, dict) and control.get("failure") == "memory_limit" and outcome.exit_code != 0:
+            status = "memory_limit"
         else:
             status = classify_exit(trigger=None, oom_killed=outcome.oom_killed, exit_code=outcome.exit_code, has_control=isinstance(control, dict))
         result_value = None

@@ -32,6 +32,8 @@ def test_cpp_and_java_wrappers_call_the_contract_entrypoints_with_native_types()
     assert b"long long solution(int, vector<long long>, vector<vector<bool>>);" in cpp.files["harness.cpp"]
     assert b"solution(arg0, arg1, arg2)" in cpp.files["harness.cpp"]
     assert b"new Solution().solution(arg0, arg1, arg2)" in java.files["Harness.java"]
+    assert b"catch (OutOfMemoryError error)" in java.files["Harness.java"]
+    assert b'{\\"failure\\":\\"memory_limit\\"}' in java.files["Harness.java"]
     assert java.runtime_command[:3] == ["java", "-Xmx384m", "-cp"]
 
 

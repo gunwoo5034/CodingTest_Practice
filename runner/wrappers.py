@@ -255,13 +255,20 @@ public class Harness {{
   public static void main(String[] ignored) throws Exception {{
     String inputLine = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)).readLine();
     JsonObject message = JsonParser.parseString(inputLine).getAsJsonObject();
-    JsonArray args = message.getAsJsonArray("args");
+    String token = message.get("token").getAsString();
+    try {{
+      JsonArray args = message.getAsJsonArray("args");
 {chr(10).join(arg_lines)}
-    long started = System.nanoTime();
-    {return_type} result = new Solution().solution({call_args});
-    double elapsed = (System.nanoTime()-started)/1_000_000.0;
-    JsonObject control = new JsonObject(); control.add("value", {encoder}(result)); control.addProperty("time_ms",elapsed); control.addProperty("memory_kb",peakRssKb());
-    System.err.print("\\n{CONTROL_PREFIX}" + message.get("token").getAsString() + ":" + control + "\\n");
+      long started = System.nanoTime();
+      {return_type} result = new Solution().solution({call_args});
+      double elapsed = (System.nanoTime()-started)/1_000_000.0;
+      JsonObject control = new JsonObject(); control.add("value", {encoder}(result)); control.addProperty("time_ms",elapsed); control.addProperty("memory_kb",peakRssKb());
+      System.err.print("\\n{CONTROL_PREFIX}" + token + ":" + control + "\\n");
+    }} catch (OutOfMemoryError error) {{
+      System.err.print("\\n{CONTROL_PREFIX}" + token + ":{{\\\"failure\\\":\\\"memory_limit\\\"}}\\n");
+      error.printStackTrace(System.err);
+      System.exit(1);
+    }}
   }}
 }}
 '''
