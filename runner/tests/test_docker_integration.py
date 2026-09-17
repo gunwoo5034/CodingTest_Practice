@@ -137,6 +137,8 @@ def test_python_return_type_failure_is_distinct_from_algorithm_exception(runner)
     assert wrong_return["status"] == "runtime_error"
     assert wrong_return["failure_kind"] == "return_type"
     assert wrong_return["value"] is None
+    assert "int32 return required" in wrong_return["stderr"]
+    assert "__LOOPCODE_RESULT__" not in wrong_return["stderr"]
     assert algorithm_error["status"] == "runtime_error"
     assert "failure_kind" not in algorithm_error
 

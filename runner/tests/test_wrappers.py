@@ -28,7 +28,7 @@ def test_python_wrapper_round_trips_long_values_at_every_depth():
 def test_python_wrapper_reports_only_return_encoding_type_errors_as_private_failure():
     model = ExecuteRequest.model_validate(request(source="def solution(*args): return [3, 2, 2, 3, 1]"))
     harness = build_execute_bundle(model).files["harness.py"]
-    assert b"except TypeError:" in harness
+    assert b"except TypeError" in harness
     assert b"'failure': 'return_type'" in harness
     assert b"result = solution.solution" in harness
     assert harness.index(b"result = solution.solution") < harness.index(b"try:\n    encoded = _encode")

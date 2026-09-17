@@ -135,7 +135,8 @@ result = {invocation}
 elapsed_ms = (time.monotonic_ns() - started) / 1_000_000
 try:
     encoded = {encoding}
-except TypeError:
+except TypeError as error:
+    sys.stderr.write("Return type error: " + str(error) + '\\n')
     control = {{'failure': 'return_type'}}
     sys.stderr.write('\\n{CONTROL_PREFIX}' + message['token'] + ':' + json.dumps(control, separators=(',', ':')) + '\\n')
     sys.stderr.flush()
