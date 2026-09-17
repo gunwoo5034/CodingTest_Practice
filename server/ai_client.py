@@ -126,7 +126,7 @@ class OpenAIClient:
                     ],
                     text_format=AIFormatRepairOutput,
                     store=False,
-                    max_output_tokens=600,
+                    max_output_tokens=4000,
                 )
         except OpenAIError as exc:
             raise AIUnavailable("OpenAI 출력 형식 진단 요청에 실패했습니다.") from exc
