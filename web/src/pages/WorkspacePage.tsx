@@ -35,8 +35,15 @@ export function WorkspacePage() {
     try {
       const started = await api.startJob(routeId, { mode, language, source }); if (!active()) return; setJob(started);
       const result = await pollJob(() => api.job(started.id)); if (!active()) return; setJob(result);
-      if (mode === 'submit') { const history = await api.submissions(routeId); if (!active()) return; const refreshed = await api.problem(routeId); if (!active()) return; setSubmissions(history); setProblem(refreshed); }
-      if (result.error && active()) setError(result.error);
+      const actionErrors = result.error ? [result.error] : [];
+      if (mode === 'submit') {
+        const [history, refreshed] = await Promise.allSettled([api.submissions(routeId), api.problem(routeId)]);
+        if (active() && history.status === 'fulfilled') setSubmissions(history.value);
+        if (active() && refreshed.status === 'fulfilled') setProblem(refreshed.value);
+        if (history.status === 'rejected') actionErrors.push(history.reason instanceof Error ? history.reason.message : String(history.reason));
+        if (refreshed.status === 'rejected') actionErrors.push(refreshed.reason instanceof Error ? refreshed.reason.message : String(refreshed.reason));
+      }
+      if (actionErrors.length && active()) setError(actionErrors.join(' · '));
     } catch (e) { if (active()) setError((e as Error).message); }
     finally { if (active()) setBusy(false); }
   };

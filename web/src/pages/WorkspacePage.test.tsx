@@ -12,7 +12,7 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason:
 const makeProblem = (id: string, title: string) => ({ id, title, status: 'ready' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: title, example_explanation: '', constraints: [], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: 'same' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [], output_format: null, is_solved: false });
 
 describe('WorkspacePage route identity', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.workspaceRuns.clear(); mocks.workspaceSubmits.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.workspaceRuns.clear(); mocks.workspaceSubmits.clear(); mocks.submissions.mockResolvedValue([]); mocks.chat.mockResolvedValue([]); mocks.draft.mockResolvedValue({ source: '' }); });
   it('ignores an older problem load after navigating to another problem', async () => {
     const a = deferred<ReturnType<typeof makeProblem>>(); const b = deferred<ReturnType<typeof makeProblem>>();
     const draftA = deferred<{ source: string }>(); const draftB = deferred<{ source: string }>();
@@ -132,10 +132,40 @@ describe('WorkspacePage route identity', () => {
     expect(mocks.problem).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a solved refresh when submission history refresh fails', async () => {
+    mocks.problem.mockResolvedValueOnce(makeProblem('a', '제출 문제')).mockResolvedValueOnce({ ...makeProblem('a', '제출 문제'), is_solved: true });
+    mocks.submissions.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('제출 기록을 불러오지 못했습니다'));
+    mocks.startJob.mockResolvedValue({ id: 'submit-job', status: 'queued', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' });
+    mocks.job.mockResolvedValue({ id: 'submit-job', status: 'completed', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '제출 문제' });
+    await mocks.workspaceSubmits.get('a')!('python', 'submit source');
+    expect(await screen.findByTitle('전체 통과한 제출 기록이 있습니다.')).toHaveTextContent('풀이 완료');
+    expect(screen.getByText('제출 기록을 불러오지 못했습니다')).toBeInTheDocument();
+  });
+
+  it('keeps refreshed submission history when solved-state refresh fails', async () => {
+    const submission = { id: 'history-job', status: 'completed', mode: 'submit', language: 'python', source: 'submitted source', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] };
+    mocks.problem.mockResolvedValueOnce(makeProblem('a', '제출 문제')).mockRejectedValueOnce(new Error('완료 상태를 불러오지 못했습니다'));
+    mocks.submissions.mockResolvedValueOnce([]).mockResolvedValueOnce([submission]);
+    mocks.startJob.mockResolvedValue({ ...submission, status: 'queued' });
+    mocks.job.mockResolvedValue(submission);
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '제출 문제' });
+    await mocks.workspaceSubmits.get('a')!('python', 'submit source');
+    fireEvent.click(screen.getByRole('button', { name: '제출 기록' }));
+    expect(screen.getByText('1 / 1 통과')).toBeInTheDocument();
+    expect(screen.getByText('완료 상태를 불러오지 못했습니다')).toBeInTheDocument();
+  });
+
   it('does not apply a late solved refresh from the previous problem', async () => {
     const lateSolved = deferred<ReturnType<typeof makeProblem>>();
+    const lateHistory = deferred<Array<Record<string, unknown>>>();
     let deferARefresh = false;
     mocks.problem.mockImplementation((id: string) => id === 'a' && deferARefresh ? lateSolved.promise : Promise.resolve(makeProblem(id, `문제 ${id.toUpperCase()}`)));
+    mocks.submissions.mockImplementation((id: string) => id === 'a' && deferARefresh ? lateHistory.promise : Promise.resolve(id === 'b' ? [{ id: 'b-history', status: 'completed', mode: 'submit', language: 'python', source: 'B source', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: false, passed: 0, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] }] : []));
     mocks.startJob.mockResolvedValue({ id: 'submit-job', status: 'queued', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' });
     mocks.job.mockResolvedValue({ id: 'submit-job', status: 'completed', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] });
     const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
@@ -147,8 +177,12 @@ describe('WorkspacePage route identity', () => {
     await router.navigate('/problems/b');
     await screen.findByRole('heading', { name: '문제 B' });
     lateSolved.resolve({ ...makeProblem('a', '문제 A'), is_solved: true });
+    lateHistory.resolve([{ id: 'a-history', status: 'completed', mode: 'submit', language: 'python', source: 'A source', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] }]);
     await submitA;
     expect(screen.getByRole('heading', { name: '문제 B' })).toBeInTheDocument();
     expect(screen.queryByTitle('전체 통과한 제출 기록이 있습니다.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '제출 기록' }));
+    expect(screen.getByText('0 / 1 통과')).toBeInTheDocument();
+    expect(screen.queryByText('1 / 1 통과')).not.toBeInTheDocument();
   });
 });
