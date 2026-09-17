@@ -90,6 +90,27 @@ def test_manager_limits_take_priority_over_harness_memory_signal(manager_status,
     assert result["status"] == expected
 
 
+def test_return_type_control_failure_is_private_but_classified_for_backend():
+    control = json.dumps({"failure": "return_type"}).encode()
+    outcome = MonitoredRun("runtime_error", b"", b"", 1, False, 1.0, control)
+
+    result = DockerRunner()._outcome_result((outcome, "token"), None)
+
+    assert result["status"] == "runtime_error"
+    assert result["failure_kind"] == "return_type"
+    assert result["value"] is None
+
+
+def test_resource_limit_takes_priority_over_return_type_control_failure():
+    control = json.dumps({"failure": "return_type"}).encode()
+    outcome = MonitoredRun("memory_limit", b"", b"", 137, True, 1.0, control)
+
+    result = DockerRunner()._outcome_result((outcome, "token"), None)
+
+    assert result["status"] == "memory_limit"
+    assert "failure_kind" not in result
+
+
 def test_runtime_container_has_no_mounts_or_network_and_uses_read_only_root():
     options = container_options(memory_mb=256, pids=64, read_only=True)
     assert options["network_disabled"] is True

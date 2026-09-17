@@ -128,6 +128,7 @@ class ExecutionResult(StrictModel):
     stderr: str = ""
     time_ms: float = 0.0
     memory_kb: int = 0
+    failure_kind: Literal["return_type"] | None = None
 
 
 def validate_wire_value(value: Any, descriptor: TypeDescriptor) -> None:

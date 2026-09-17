@@ -97,6 +97,7 @@ def _problem_public(problem: Problem) -> ProblemPublic:
         tests=[_test_public(item) for item in _visible_tests(problem)],
         latest_generation_job_id=problem.latest_generation_job_id,
         generation_error=problem.generation_error,
+        output_format=(problem.generation_meta or {}).get("output_format"),
     )
 
 

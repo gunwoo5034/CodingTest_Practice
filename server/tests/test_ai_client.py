@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from server.ai_client import OpenAIClient
-from server.schemas import AIAnalysisOutput, AIGenerationOutput, AITutorOutput
+from server.schemas import AIAnalysisOutput, AIFormatRepairOutput, AIGenerationOutput, AITutorOutput
 
 
 class FakeResponses:
@@ -32,6 +32,8 @@ class FakeResponses:
                 generator_source="def main(payload): return []",
                 notes="test",
             )
+        elif schema is AIFormatRepairOutput:
+            parsed = schema(output_format="concat_decimal", reason="배열의 정수를 이어 붙입니다.")
         else:
             parsed = AITutorOutput(content="답변")
         return SimpleNamespace(
@@ -73,11 +75,20 @@ async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_con
     payload = {"signature": {"parameters": [], "return_type": {"base": "long", "dimensions": 0}}}
     await client.analyze({"text": "문제", "image": None, "image_mime": None})
     await client.generate(payload)
+    repaired = await client.repair_output_format(
+        {
+            "signature": payload["signature"],
+            "reference_source": "def solution(a): return [a]",
+            "brute_source": "def solution(a): return [a]",
+            "examples": [{"args": [[3, 2, 2, 3, 1]], "expected": 32231}],
+        }
+    )
     await client.tutor({"mode": "hint"})
 
-    assert (factory.created, factory.entered, factory.exited) == (3, 3, 3)
+    assert (factory.created, factory.entered, factory.exited) == (4, 4, 4)
     analysis_prompt = factory.calls[0]["input"][0]["content"]
     generation_prompt = factory.calls[1]["input"][0]["content"]
+    repair_prompt = factory.calls[2]["input"][0]["content"]
     assert "examples_json" in analysis_prompt
     assert "10진 문자열" in analysis_prompt
     assert '"parameters"' in analysis_prompt
@@ -94,11 +105,16 @@ async def test_openai_client_uses_request_scoped_sdk_and_explicit_generation_con
     assert "10진 문자열" in generation_prompt
     assert "독립" in generation_prompt
     assert "경계" in generation_prompt
+    assert "인자 배열" in generation_prompt
+    assert "공개 예제" in generation_prompt
+    assert "표현 규칙" in repair_prompt
+    assert "알고리즘" in repair_prompt
+    assert repaired["output_format"] == "concat_decimal"
     assert all(call["store"] is False for call in factory.calls)
 
-    tutor_prompt = factory.calls[2]["input"][0]["content"]
+    tutor_prompt = factory.calls[3]["input"][0]["content"]
     assert "hint" in tutor_prompt and "단계" in tutor_prompt
     assert "question" in tutor_prompt and "전체 풀이" in tutor_prompt
     assert "solution" in tutor_prompt and "정답 코드" in tutor_prompt
-    tutor_payload = factory.calls[2]["input"][1]["content"]
+    tutor_payload = factory.calls[3]["input"][1]["content"]
     assert '"mode": "hint"' in tutor_payload

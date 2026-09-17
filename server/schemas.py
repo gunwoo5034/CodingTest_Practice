@@ -9,6 +9,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 Language = Literal["python", "cpp", "java", "javascript"]
 BaseType = Literal["int", "long", "string", "bool"]
+OutputFormat = Literal["none", "concat_decimal", "space_separated", "comma_separated", "json_array"]
 
 
 def _as_utc(value):
@@ -78,6 +79,7 @@ class ProblemPublic(ProblemSummary):
     tests: list[TestCasePublic]
     latest_generation_job_id: str | None = None
     generation_error: str | None = None
+    output_format: OutputFormat | None
 
 
 class ProblemCreate(BaseModel):
@@ -206,6 +208,8 @@ class GenerationSummary(BaseModel):
     small_crosscheck_count: int
     hidden_count: int
     model: str
+    output_format: OutputFormat | None = None
+    format_repair_attempted: bool = False
 
 
 class GenerationJobPublic(BaseModel):
@@ -244,7 +248,7 @@ class ChatTurnPublic(BaseModel):
 
 
 class AIUsagePublic(BaseModel):
-    operation: Literal["analyze", "generate", "tutor"]
+    operation: Literal["analyze", "generate", "format_repair", "tutor"]
     model: str
     input_tokens: int
     output_tokens: int
@@ -277,6 +281,11 @@ class AIGenerationOutput(BaseModel):
     validator_source: str
     generator_source: str
     notes: str
+
+
+class AIFormatRepairOutput(BaseModel):
+    output_format: OutputFormat
+    reason: str = Field(max_length=500)
 
 
 class AITutorOutput(BaseModel):

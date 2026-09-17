@@ -941,6 +941,7 @@
             "enum": [
               "analyze",
               "generate",
+              "format_repair",
               "tutor"
             ],
             "title": "Operation"
@@ -1292,6 +1293,29 @@
           "model": {
             "type": "string",
             "title": "Model"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "concat_decimal",
+                  "space_separated",
+                  "comma_separated",
+                  "json_array"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Format"
+          },
+          "format_repair_attempted": {
+            "type": "boolean",
+            "title": "Format Repair Attempted",
+            "default": false
           }
         },
         "type": "object",
@@ -1721,6 +1745,24 @@
               }
             ],
             "title": "Generation Error"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "concat_decimal",
+                  "space_separated",
+                  "comma_separated",
+                  "json_array"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Format"
           }
         },
         "type": "object",
@@ -1737,7 +1779,8 @@
           "templates",
           "time_limit_ms",
           "memory_limit_mb",
-          "tests"
+          "tests",
+          "output_format"
         ],
         "title": "ProblemPublic"
       },

@@ -120,6 +120,27 @@ def test_compile_and_time_failures_have_distinct_statuses(runner):
     assert time_limit["status"] == "time_limit"
 
 
+def test_python_return_type_failure_is_distinct_from_algorithm_exception(runner):
+    base = {
+        "language": "python",
+        "signature": {"parameters": [{"name": "value", "type": {"base": "int", "dimensions": 0}}], "return_type": {"base": "int", "dimensions": 0}},
+        "cases": [{"id": "case", "args": [3]}],
+        "limits": {"time_ms": 2000, "memory_mb": 256, "output_kb": 64},
+    }
+    wrong_return = runner.execute(
+        ExecuteRequest.model_validate({**base, "source": "def solution(value): return [value]"})
+    )["results"][0]
+    algorithm_error = runner.execute(
+        ExecuteRequest.model_validate({**base, "source": "def solution(value): raise TypeError('algorithm failure')"})
+    )["results"][0]
+
+    assert wrong_return["status"] == "runtime_error"
+    assert wrong_return["failure_kind"] == "return_type"
+    assert wrong_return["value"] is None
+    assert algorithm_error["status"] == "runtime_error"
+    assert "failure_kind" not in algorithm_error
+
+
 def test_runtime_cannot_write_root_or_see_network_socket_or_secret(runner):
     source = '''import os, socket
 def solution(value):

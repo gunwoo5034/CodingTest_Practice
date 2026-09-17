@@ -18,6 +18,24 @@ def _results(values):
     }
 
 
+def _return_type_results(count):
+    return {
+        "results": [
+            {
+                "id": f"case-{index}",
+                "status": "runtime_error",
+                "failure_kind": "return_type",
+                "value": None,
+                "stdout": "",
+                "stderr": "",
+                "time_ms": 1,
+                "memory_kb": 100,
+            }
+            for index in range(count)
+        ]
+    }
+
+
 def test_generation_crosschecks_and_atomically_installs_tests(client, runner, ai):
     problem = client.get("/api/problems").json()[0]
     runner.script_responses.append(_script([True]))
@@ -106,6 +124,208 @@ def test_generation_failure_keeps_existing_tests(client, runner, ai):
     assert updated["tests"] == before
 
 
+def test_generation_repairs_shared_output_format_once_and_records_usage(client, runner, ai):
+    created = client.post(
+        "/api/problems",
+        json={
+            "title": "방문 순서",
+            "statement": "방문 순서를 하나의 정수로 반환하세요.",
+            "constraints": [],
+            "signature": {
+                "parameters": [{"name": "nodes", "type": {"base": "int", "dimensions": 1}}],
+                "return_type": {"base": "int", "dimensions": 0},
+            },
+        },
+    ).json()
+    public = client.post(
+        f"/api/problems/{created['id']}/tests",
+        json={"kind": "public", "args": [[1]], "expected": 32231},
+    )
+    assert public.status_code == 201
+    ai.bundle = {
+        "reference_source": "def solution(nodes): return [3, 2, 2, 3, 1]",
+        "brute_source": "def solution(nodes):\n result = [3, 2, 2, 3, 1]\n return result",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "visit order",
+        "model": "fake-generation",
+        "input_tokens": 100,
+        "output_tokens": 200,
+    }
+    ai.repair = {
+        "output_format": "concat_decimal",
+        "reason": "정수 방문 순서를 이어 붙입니다.",
+        "model": "fake-generation",
+        "input_tokens": 11,
+        "output_tokens": 7,
+    }
+    small = [[[index]] for index in range(50)]
+    hidden = [[[index + 100]] for index in range(30)]
+    runner.script_responses.extend(
+        [_script([True]), _script([True]), _script(small), _script([True] * 50), _script(hidden), _script([True] * 30)]
+    )
+    runner.execute_responses.extend(
+        [
+            _return_type_results(1),
+            _return_type_results(1),
+            _results([32231]),
+            _results([32231]),
+            _results([int(f"{index}{index}") if index else 0 for index in range(50)]),
+            _results([int(f"{index}{index}") if index else 0 for index in range(50)]),
+            _results([int(f"{index + 100}{index + 100}") for index in range(30)]),
+        ]
+    )
+
+    response = client.post(f"/api/problems/{created['id']}/ai/generate", json={"seed": 44})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    problem = client.get(f"/api/problems/{created['id']}").json()
+    assert job["status"] == "completed"
+    assert job["summary"]["output_format"] == "concat_decimal"
+    assert job["summary"]["format_repair_attempted"] is True
+    assert problem["output_format"] == "concat_decimal"
+    repair_calls = [payload for operation, payload in ai.calls if operation == "format_repair"]
+    assert len(repair_calls) == 1
+    assert repair_calls[0]["examples"] == [{"args": [[1]], "expected": 32231}]
+    assert all("expected" not in call for call in runner.execute_calls)
+    repaired_sources = [call["source"] for call in runner.execute_calls[2:4]]
+    assert all("_loopcode_original_namespace" in source for source in repaired_sources)
+    usage = client.get("/api/ai/usage").json()
+    assert any(item["operation"] == "format_repair" and item["input_tokens"] == 11 for item in usage)
+
+
+def test_generation_does_not_request_format_repair_for_timeout(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return sum(numbers)",
+        "brute_source": "def solution(numbers): return sum(numbers)",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "timeout",
+        "model": "fake-generation",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    runner.script_responses.append(_script([True] * 3))
+    runner.execute_responses.append(
+        {"results": [{"id": "case-0", "status": "time_limit", "time_ms": 2000, "memory_kb": 10}]}
+    )
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 45})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert [operation for operation, _ in ai.calls] == ["generate"]
+
+
+def test_generation_does_not_request_format_repair_for_generic_runtime_error(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): raise ValueError('algorithm bug')",
+        "brute_source": "def solution(numbers): return sum(numbers)",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "runtime bug",
+        "model": "fake-generation",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    runner.script_responses.append(_script([True] * 3))
+    runner.execute_responses.append(
+        {"results": [{"id": "case-0", "status": "runtime_error", "time_ms": 1, "memory_kb": 10}]}
+    )
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 47})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert [operation for operation, _ in ai.calls] == ["generate"]
+
+
+def test_nonrepairable_failure_wins_over_other_example_mismatch(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return 0",
+        "brute_source": "def solution(numbers):\n while True: pass",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "mixed failure",
+        "model": "fake-generation",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    runner.script_responses.append(_script([True] * 3))
+    runner.execute_responses.extend(
+        [
+            _results([0, 0, 0]),
+            {"results": [{"id": "case-0", "status": "time_limit", "time_ms": 2000, "memory_kb": 10}]},
+        ]
+    )
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 49})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert [operation for operation, _ in ai.calls] == ["generate"]
+
+
+def test_failed_repair_is_not_retried_and_usage_is_recorded(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return [6]",
+        "brute_source": "def solution(numbers): return [6]",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "wrong repair",
+        "model": "fake-generation",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    ai.repair = {
+        "output_format": "none",
+        "reason": "변환 없음",
+        "model": "fake-generation",
+        "input_tokens": 4,
+        "output_tokens": 2,
+    }
+    runner.script_responses.append(_script([True] * 3))
+    runner.execute_responses.extend([_results([[6], [0], [12]]), _results([[6], [0], [12]])])
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 46})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert [operation for operation, _ in ai.calls].count("format_repair") == 1
+    usage = client.get("/api/ai/usage").json()
+    assert any(item["operation"] == "format_repair" and item["output_tokens"] == 2 for item in usage)
+
+
+def test_generation_rejects_wrong_values_after_one_format_repair(client, runner, ai):
+    problem = client.get("/api/problems").json()[0]
+    ai.bundle = {
+        "reference_source": "def solution(numbers): return [sum(numbers)]",
+        "brute_source": "def solution(numbers): return [sum(numbers)]",
+        "validator_source": "def main(payload): return [True for _ in payload]",
+        "generator_source": "def main(payload): return []",
+        "notes": "still wrong",
+        "model": "fake-generation",
+        "input_tokens": 1,
+        "output_tokens": 1,
+    }
+    ai.repair = {
+        "output_format": "concat_decimal",
+        "reason": "정수 목록 연결",
+        "model": "fake-generation",
+        "input_tokens": 4,
+        "output_tokens": 2,
+    }
+    runner.script_responses.extend([_script([True] * 3), _script([True] * 3)])
+    runner.execute_responses.extend(
+        [
+            _return_type_results(3),
+            _return_type_results(3),
+            _results([999, 999, 999]),
+            _results([999, 999, 999]),
+        ]
+    )
+    response = client.post(f"/api/problems/{problem['id']}/ai/generate", json={"seed": 48})
+    job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert job["error"] == "출력 표현을 보정했지만 공개 예제의 기대값과 일치하지 않습니다. 예제 또는 문제 설명을 확인한 뒤 다시 준비하세요."
+    assert [operation for operation, _ in ai.calls].count("format_repair") == 1
+
+
 def test_generation_rejects_non_boolean_public_validation(client, runner, ai):
     problem = client.get("/api/problems").json()[0]
     ai.bundle = {
@@ -123,6 +343,7 @@ def test_generation_rejects_non_boolean_public_validation(client, runner, ai):
     job = client.get(f"/api/generation-jobs/{response.json()['id']}").json()
     assert job["status"] == "failed"
     assert runner.execute_calls == []
+    assert [operation for operation, _ in ai.calls] == ["generate"]
 
 
 def test_generation_supplements_public_examples_up_to_three():

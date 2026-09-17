@@ -133,7 +133,13 @@ spec.loader.exec_module(solution)
 started = time.monotonic_ns()
 result = {invocation}
 elapsed_ms = (time.monotonic_ns() - started) / 1_000_000
-encoded = {encoding}
+try:
+    encoded = {encoding}
+except TypeError:
+    control = {{'failure': 'return_type'}}
+    sys.stderr.write('\\n{CONTROL_PREFIX}' + message['token'] + ':' + json.dumps(control, separators=(',', ':')) + '\\n')
+    sys.stderr.flush()
+    sys.exit(1)
 json.dumps(encoded, ensure_ascii=False, allow_nan=False)
 control = {{'value': encoded, 'time_ms': elapsed_ms, 'memory_kb': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}}
 sys.stderr.write('\\n{CONTROL_PREFIX}' + message['token'] + ':' + json.dumps(control, ensure_ascii=False, separators=(',', ':'), allow_nan=False) + '\\n')

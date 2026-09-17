@@ -454,6 +454,7 @@ class DockerRunner:
         else:
             status = classify_exit(trigger=None, oom_killed=outcome.oom_killed, exit_code=outcome.exit_code, has_control=isinstance(control, dict))
         result_value = None
+        failure_kind = None
         time_ms = outcome.elapsed_ms
         memory_kb = 0
         if status == "ok" and isinstance(control, dict):
@@ -468,7 +469,9 @@ class DockerRunner:
             except (KeyError, TypeError, ValueError):
                 status = "runtime_error"
                 result_value = None
-        return {
+        elif status == "runtime_error" and isinstance(control, dict) and control.get("failure") == "return_type":
+            failure_kind = "return_type"
+        result = {
             "status": status,
             "value": result_value,
             "stdout": stdout.decode("utf-8", errors="replace"),
@@ -476,6 +479,9 @@ class DockerRunner:
             "time_ms": round(time_ms, 3),
             "memory_kb": memory_kb,
         }
+        if failure_kind is not None:
+            result["failure_kind"] = failure_kind
+        return result
 
     @staticmethod
     def _failure_result(outcome: MonitoredRun) -> dict:

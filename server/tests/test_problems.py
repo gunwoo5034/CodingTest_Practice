@@ -13,6 +13,7 @@ def test_seed_problem_is_public_and_redacted(client):
 
     detail = client.get(f"/api/problems/{problem['id']}").json()
     assert detail["status"] == "ready"
+    assert detail["output_format"] is None
     assert len(detail["tests"]) == 3
     serialized = str(detail).lower()
     assert "reference" not in serialized

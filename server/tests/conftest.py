@@ -33,6 +33,7 @@ class FakeAI:
     def __init__(self) -> None:
         self.analysis = None
         self.bundle = None
+        self.repair = None
         self.reply = None
         self.calls: list[tuple[str, dict]] = []
 
@@ -43,6 +44,10 @@ class FakeAI:
     async def generate(self, payload: dict):
         self.calls.append(("generate", payload))
         return self.bundle
+
+    async def repair_output_format(self, payload: dict):
+        self.calls.append(("format_repair", payload))
+        return self.repair
 
     async def tutor(self, payload: dict):
         self.calls.append(("tutor", payload))
