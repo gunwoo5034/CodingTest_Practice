@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditProblemPage } from './EditProblemPage';
 
 const mocks = vi.hoisted(() => ({ problem: vi.fn(), updateProblem: vi.fn(), updateTest: vi.fn(), createTest: vi.fn(), deleteTest: vi.fn(), generate: vi.fn() }));
 vi.mock('../api/client', async (load) => ({ ...(await load<typeof import('../api/client')>()), api: mocks }));
 const problem = { id: 'p1', title: '합계', status: 'analyzed' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: '설명', constraints: ['n > 0'], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: '' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [{ id: 't1', kind: 'public' as const, position: 0, args: [1], expected: 1, suite_version: 1 }] };
+const problemFor = (id: string) => ({ ...problem, id, title: `문제 ${id.toUpperCase()}`, tests: problem.tests.map((test) => ({ ...test, id: `${id}-test` })) });
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 const renderPage = () => render(<MemoryRouter initialEntries={['/problems/p1/edit']}><Routes><Route path="/problems/:id/edit" element={<EditProblemPage />} /></Routes></MemoryRouter>);
 
 describe('EditProblemPage examples', () => {
@@ -29,5 +31,32 @@ describe('EditProblemPage examples', () => {
     fireEvent.change(within(editor).getByLabelText('expected'), { target: { value: '3' } });
     await user.click(within(editor).getByRole('button', { name: '추가' }));
     await waitFor(() => expect(mocks.createTest).toHaveBeenCalledWith('p1', { kind: 'public', args: [3], expected: 3 }));
+  });
+
+  it('does not generate or apply a save after its route changed', async () => {
+    const saveA = deferred<typeof problem>();
+    mocks.problem.mockImplementation((id: string) => Promise.resolve(problemFor(id)));
+    mocks.updateProblem.mockImplementation((id: string) => id === 'a' ? saveA.promise : Promise.resolve(problemFor(id)));
+    const router = createMemoryRouter([{ path: '/problems/:id/edit', element: <EditProblemPage /> }], { initialEntries: ['/problems/a/edit'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByDisplayValue('문제 A');
+    fireEvent.click(screen.getByRole('button', { name: '테스트 준비 시작' }));
+    await waitFor(() => expect(mocks.updateProblem).toHaveBeenCalledWith('a', expect.anything()));
+    await router.navigate('/problems/b/edit');
+    expect(await screen.findByDisplayValue('문제 B')).toBeInTheDocument();
+    saveA.resolve(problemFor('a'));
+    await Promise.resolve(); await Promise.resolve();
+    expect(screen.getByDisplayValue('문제 B')).toBeInTheDocument();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a changed example dirty when deletion fails', async () => {
+    mocks.deleteTest.mockRejectedValue(new Error('예제를 삭제할 수 없습니다.'));
+    renderPage();
+    fireEvent.change(await screen.findByLabelText('args'), { target: { value: '[2]' } });
+    fireEvent.click(screen.getByRole('button', { name: '예제 1 삭제' }));
+    expect(await screen.findAllByText('예제를 삭제할 수 없습니다.')).not.toHaveLength(0);
+    expect(screen.getByText(/저장하지 않은 예제/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '테스트 준비 시작' })).toBeDisabled();
   });
 });

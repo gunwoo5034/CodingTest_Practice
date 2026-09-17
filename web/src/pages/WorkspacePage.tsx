@@ -7,6 +7,7 @@ import { CodeWorkspace } from '../components/CodeWorkspace';
 import { StatusBadge } from '../components/StatusBadge';
 import { TutorDrawer } from '../components/TutorDrawer';
 import { formatDate, languageLabel, parseJsonValue, statusLabels, typeLabel } from '../lib/domain';
+import { draftKey, waitForDraftSaves } from '../lib/draftSaveQueue';
 
 type DockTab = 'tests' | 'results' | 'history';
 
@@ -15,18 +16,34 @@ export function WorkspacePage() {
   const [job, setJob] = useState<Job | null>(null); const [submissions, setSubmissions] = useState<Job[]>([]); const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [tab, setTab] = useState<DockTab>('tests'); const [busy, setBusy] = useState(false); const [tutorBusy, setTutorBusy] = useState(false); const [tutorOpen, setTutorOpen] = useState(false); const [error, setError] = useState('');
   const [split, setSplit] = useState(43); const current = useRef<{ language: Language; source: string }>({ language: 'python', source: '' });
-  const loadRevision = useRef(0); const loadedId = useRef('');
+  const loadRevision = useRef(0); const loadedId = useRef(''); const runOperation = useRef(0); const tutorOperation = useRef(0);
   const reloadProblem = async () => { const routeId = id; const value = await api.problem(routeId); if (loadedId.current === routeId) setProblem(value); };
   useEffect(() => {
-    const revision = ++loadRevision.current; loadedId.current = ''; setProblem(null); setInitialSource(''); setJob(null); setSubmissions([]); setTurns([]); setError('');
-    Promise.all([api.problem(id), api.draft(id, 'python'), api.submissions(id), api.chat(id)]).then(([p,d,s,c]) => {
+    const revision = ++loadRevision.current; runOperation.current += 1; tutorOperation.current += 1; loadedId.current = ''; setProblem(null); setInitialSource(''); setJob(null); setSubmissions([]); setTurns([]); setError(''); setBusy(false); setTutorBusy(false);
+    Promise.all([api.problem(id), waitForDraftSaves(draftKey(id, 'python')).then(() => api.draft(id, 'python')), api.submissions(id), api.chat(id)]).then(([p,d,s,c]) => {
       if (loadRevision.current !== revision) return;
       loadedId.current = id; setProblem(p); setInitialSource(d.source); current.current = { language: 'python', source: d.source }; setSubmissions(s); setTurns(c);
     }).catch((e: Error) => { if (loadRevision.current === revision) setError(e.message); });
     return () => { if (loadRevision.current === revision) loadRevision.current += 1; };
   }, [id]);
-  const run = async (mode: 'run' | 'submit', language: Language, source: string) => { setBusy(true); setError(''); setTab('results'); try { const started = await api.startJob(id, { mode, language, source }); setJob(started); const result = await pollJob(() => api.job(started.id)); setJob(result); if (mode === 'submit') setSubmissions(await api.submissions(id)); if (result.error) setError(result.error); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
-  const tutor = async (mode: TutorMode, message: string) => { setTutorBusy(true); setError(''); try { await api.tutor(id, { mode, message, language: current.current.language, source: current.current.source }); setTurns(await api.chat(id)); } catch (e) { setError((e as Error).message); throw e; } finally { setTutorBusy(false); } };
+  const run = async (mode: 'run' | 'submit', language: Language, source: string) => {
+    const routeId = id; const operation = ++runOperation.current; const active = () => loadedId.current === routeId && runOperation.current === operation;
+    setBusy(true); setError(''); setTab('results');
+    try {
+      const started = await api.startJob(routeId, { mode, language, source }); if (!active()) return; setJob(started);
+      const result = await pollJob(() => api.job(started.id)); if (!active()) return; setJob(result);
+      if (mode === 'submit') { const history = await api.submissions(routeId); if (!active()) return; setSubmissions(history); }
+      if (result.error && active()) setError(result.error);
+    } catch (e) { if (active()) setError((e as Error).message); }
+    finally { if (active()) setBusy(false); }
+  };
+  const tutor = async (mode: TutorMode, message: string) => {
+    const routeId = id; const operation = ++tutorOperation.current; const active = () => loadedId.current === routeId && tutorOperation.current === operation;
+    setTutorBusy(true); setError('');
+    try { await api.tutor(routeId, { mode, message, language: current.current.language, source: current.current.source }); if (!active()) return; const history = await api.chat(routeId); if (active()) setTurns(history); }
+    catch (e) { if (active()) { setError((e as Error).message); throw e; } }
+    finally { if (active()) setTutorBusy(false); }
+  };
   const resize = (event: React.PointerEvent) => { const target = event.currentTarget.parentElement!; event.currentTarget.setPointerCapture(event.pointerId); const move = (next: PointerEvent) => { const rect = target.getBoundingClientRect(); setSplit(Math.min(68, Math.max(28, ((next.clientX - rect.left) / rect.width) * 100))); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); };
   if (!problem) return <div className="workspace-loading">{error || '작업공간을 준비하는 중…'}</div>;
   return <div className="workspace-page">
@@ -35,7 +52,7 @@ export function WorkspacePage() {
     <div className="workspace-content" style={{ gridTemplateColumns: `${split}% 6px 1fr` }}>
       <section className="statement-pane"><div className="statement-scroll"><div className="statement-kicker">문제 설명</div><ReactMarkdown>{problem.statement}</ReactMarkdown>{problem.constraints.length > 0 && <><h2>제한사항</h2><ul>{problem.constraints.map((item, i) => <li key={i}>{item}</li>)}</ul></>}<h2>함수 정보</h2><div className="signature-card"><div><span>매개변수</span>{problem.signature.parameters.map((param) => <code key={param.name}>{param.name}: {typeLabel(param.type)}</code>)}</div><div><span>반환</span><code>{typeLabel(problem.signature.return_type)}</code></div></div><h2>예제</h2>{problem.tests.filter((item) => item.kind === 'public').map((test, i) => <div className="example-card" key={test.id}><strong>예제 {i + 1}</strong><div><span>args</span><code>{JSON.stringify(test.args)}</code></div><div><span>return</span><code>{JSON.stringify(test.expected)}</code></div></div>)}</div></section>
       <div className="resize-handle" role="separator" aria-label="문제와 코드 너비 조절" onPointerDown={resize} />
-      <div className="right-workspace"><div className="editor-slot"><CodeWorkspace key={id} initialLanguage="python" initialSource={initialSource} onSaveDraft={(language, source) => api.saveDraft(id, language, source)} onLoadDraft={async (language) => (await api.draft(id, language)).source} onRun={(language, source) => run('run', language, source)} onSubmit={(language, source) => run('submit', language, source)} submitDisabled={problem.status !== 'ready'} busy={busy} onLanguageChange={(language, source) => { current.current = { language, source }; }} /></div>
+      <div className="right-workspace"><div className="editor-slot"><CodeWorkspace key={id} problemId={id} initialLanguage="python" initialSource={initialSource} onSaveDraft={(language, source) => api.saveDraft(id, language, source)} onLoadDraft={async (language) => (await api.draft(id, language)).source} onRun={(language, source) => run('run', language, source)} onSubmit={(language, source) => run('submit', language, source)} submitDisabled={problem.status !== 'ready'} busy={busy} onLanguageChange={(language, source) => { current.current = { language, source }; }} onSaveError={(message) => { if (loadedId.current === id) setError(message); }} /></div>
         <BottomDock tab={tab} setTab={setTab} problem={problem} job={job} submissions={submissions} busy={busy} reload={reloadProblem} />
       </div>
     </div>
@@ -62,8 +79,9 @@ function TestsPanel({ problem, reload }: { problem: Problem; reload: () => Promi
 function TestRow({ test, index, problemId, reload }: { test: TestCase; index: number; problemId: string; reload: () => Promise<void> }) {
   const [editing, setEditing] = useState(false); const [args, setArgs] = useState(JSON.stringify(test.args)); const [expected, setExpected] = useState(JSON.stringify(test.expected)); const [error, setError] = useState('');
   const save = async () => { try { const a = parseJsonValue(args); if (!Array.isArray(a)) throw new Error('args는 JSON 배열이어야 합니다.'); await api.updateTest(problemId, test.id, { args: a, expected: parseJsonValue(expected) }); setEditing(false); await reload(); } catch (e) { setError((e as Error).message); } };
+  const remove = async () => { try { setError(''); await api.deleteTest(problemId, test.id); await reload(); } catch (e) { setError((e as Error).message); } };
   if (editing) return <div className="inline-case-edit"><div className="test-fields"><label>args<textarea value={args} onChange={(e) => setArgs(e.target.value)} /></label><label>expected<textarea value={expected} onChange={(e) => setExpected(e.target.value)} /></label></div>{error && <small className="field-error">{error}</small>}<div className="inline-actions"><button className="button subtle" onClick={() => setEditing(false)}>취소</button><button className="button primary" onClick={() => void save()}>저장</button></div></div>;
-  return <div className="case-row"><span className={`case-kind ${test.kind}`}>{test.kind === 'public' ? '공개' : '사용자'}</span><strong>테스트 {index + 1}</strong><code>{JSON.stringify(test.args)}</code><span>→</span><code>{JSON.stringify(test.expected)}</code><button className="text-button" onClick={() => setEditing(true)}>편집</button>{test.kind === 'user' && <button className="icon-button danger" aria-label={`테스트 ${index + 1} 삭제`} onClick={() => void api.deleteTest(problemId, test.id).then(reload)}><XCircle size={15} /></button>}</div>;
+  return <><div className="case-row"><span className={`case-kind ${test.kind}`}>{test.kind === 'public' ? '공개' : '사용자'}</span><strong>테스트 {index + 1}</strong><code>{JSON.stringify(test.args)}</code><span>→</span><code>{JSON.stringify(test.expected)}</code><button className="text-button" onClick={() => setEditing(true)}>편집</button>{test.kind === 'user' && <button className="icon-button danger" aria-label={`테스트 ${index + 1} 삭제`} onClick={() => void remove()}><XCircle size={15} /></button>}</div>{error && <small className="field-error">{error}</small>}</>;
 }
 
 function ResultsPanel({ job }: { job: Job | null }) {

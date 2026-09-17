@@ -7,6 +7,7 @@ import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import { App } from './App';
 import './styles.css';
+import './styles-fixes.css';
 import './mobile.css';
 
 self.MonacoEnvironment = {

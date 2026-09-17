@@ -1,0 +1,16 @@
+.editor-slot,
+.code-workspace,
+.code-workspace > div,
+.code-workspace > section,
+.pane-toolbar {
+  min-width: 0;
+}
+
+.code-workspace {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pane-toolbar {
+  width: 100%;
+}

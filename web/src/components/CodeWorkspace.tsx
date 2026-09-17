@@ -3,8 +3,10 @@ import { Play, Send } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Language } from '../api/client';
 import { languages } from '../lib/domain';
+import { draftKey, enqueueDraftSave, waitForDraftSaves } from '../lib/draftSaveQueue';
 
 type Props = {
+  problemId: string;
   initialLanguage: Language;
   initialSource: string;
   onSaveDraft: (language: Language, source: string) => Promise<unknown>;
@@ -14,6 +16,7 @@ type Props = {
   submitDisabled: boolean;
   busy?: boolean;
   onLanguageChange?: (language: Language, source: string) => void;
+  onSaveError?: (message: string) => void;
 };
 
 export function CodeWorkspace(props: Props) {
@@ -26,14 +29,19 @@ export function CodeWorkspace(props: Props) {
   const languageRef = useRef(language);
   const dirtyRef = useRef(false);
   const revisionRef = useRef(0);
-  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const mountedRef = useRef(true);
   useEffect(() => { sourceRef.current = source; languageRef.current = language; props.onLanguageChange?.(language, source); }, [language, source]);
-  useEffect(() => () => { mountedRef.current = false; window.clearTimeout(timer.current); if (dirtyRef.current) void enqueueSave(languageRef.current, sourceRef.current, revisionRef.current); }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timer.current);
+      if (dirtyRef.current) void enqueueSave(languageRef.current, sourceRef.current, revisionRef.current).catch((error: Error) => props.onSaveError?.(error.message));
+    };
+  }, []);
 
   const enqueueSave = (targetLanguage: Language, targetSource: string, revision: number) => {
-    const request = saveChainRef.current.catch(() => undefined).then(() => props.onSaveDraft(targetLanguage, targetSource));
-    saveChainRef.current = request.catch(() => undefined);
+    const request = enqueueDraftSave(draftKey(props.problemId, targetLanguage), () => props.onSaveDraft(targetLanguage, targetSource));
     return request.then((result) => {
       if (revisionRef.current === revision && languageRef.current === targetLanguage && sourceRef.current === targetSource) {
         dirtyRef.current = false;
@@ -64,6 +72,7 @@ export function CodeWorkspace(props: Props) {
     setSaving('saving');
     try {
       await enqueueSave(language, sourceRef.current, revisionRef.current);
+      await waitForDraftSaves(draftKey(props.problemId, next));
       const loaded = await props.onLoadDraft(next);
       setLanguage(next);
       languageRef.current = next;
