@@ -81,3 +81,9 @@ Supported adaptation: one-dimensional native integer lists/tuples to scalar int/
 Record additional calls as AI usage operation `format_repair`. Generation metadata and `GenerationSummary` include `output_format` and `format_repair_attempted`; `ProblemPublic.output_format` is nullable and derived from the installed generation metadata. Expose only the enum, never source code, private diagnostics, or hidden data. Existing records without adaptation metadata remain compatible. Manual expected-value calculation and execution/submission use the stored wrapped solution / unchanged typed comparison with no AI calls.
 
 UI: explain before generation that preparation may make one extra AI request for return-format adaptation. Show the applied format after successful preparation, restore it on reload, and retain actionable failure text and the existing retry action. No new endpoint or database column is required.
+
+## Problem completion
+
+`ProblemSummary` and `ProblemPublic` expose read-only `is_solved: boolean` (default false). Derive it from persisted execution jobs: at least one completed submit with a positive test count and `summary.all_passed === true`. Successful public-only run and partial/failed/interrupted submission never qualify. Subsequent failure does not clear historical completion. This describes past successful completion, independently of current test-preparation status/revision. No paid AI, new table, or mutable completion endpoint. Avoid list-query N+1 work.
+
+The library card and workspace header show a separate `풀이 완료` badge, retaining existing preparation status. After a successful submission the workspace refreshes completion, guarded against route changes; refreshing or restarting preserves it through persisted history. Existing successful submissions also qualify automatically.
