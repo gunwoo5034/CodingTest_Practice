@@ -1,14 +1,74 @@
-# Implementation ledger
+# 구현 및 검증 기록
 
-- User authorized implementation; no public deployment or live paid API test requested.
-- Initial workspace contained only PLAN.md, AGENTS.md, CLAUDE.md; initialized local Git repository. No existing code or tests to preserve, so work in place rather than creating a redundant worktree.
-- Host: macOS arm64, system Python 3.9.6; Node, uv and Docker initially absent. Project-local tools will be used; Docker isolation tests require Docker Desktop.
-- Contract: docs/CONTRACT.md. Root owns contract changes, one implementation writer at a time.
-- Pending: backend → runner → frontend → integration/review.
-- Project-local Node 22 and uv installed; uv Python 3.12 provisioned. Playwright Chromium headless installed for browser validation.
-- Runner design reviewed: restricted writable compile stage → temporary image → per-case read-only runtime, no host bind mount; bounded stdout/stderr collection, no AI judging.
-- Backend commit 8ec4401: 16 tests passed, compileall/OpenAPI export/diff check passed. Root started API on127.0.0.1:8000 and observed health200(database ok, runner absent) and demo problems200. Live OpenAI was not called.
-- Runner implementation started; independent backend review in progress. Frontend compared frozen OpenAPI and found no remaining integration blocker.
-- Docker Desktop ready:29.8.0 Linux aarch64, Compose5.5.1. Root ran network-disabled Alpine container and verified Docker socket bind works. CLI available at /Applications/Docker.app/Contents/Resources/bin/docker; host SDK uses unix:///Users/gunwoo/.docker/run/docker.sock.
-- Backend review findings confirmed: validate original examples and user test constraints; require strict bool validator output; reject explicit-null PATCH fields; return submitted source in history; public Java class template. Backend fix scheduled after runner writer slot, before frontend. Draft problems without validator allow type-only edits; generation must validate all retained visible inputs.
-- User added JavaScript(Node22) solution language during implementation. All owners notified; contracts/docs updated. Backend schema/templates and frontend selector must include `javascript`; runner uses native BigInt for long.
+기준일: 2026-09-17. 사용자가 구현을 승인한 로컬 웹앱이며, 공개 배포나 실제 유료 API 호출은 수행하지 않았다.
+
+## 현재 상태
+
+- Docker Desktop 설치·실행 확인: macOS Apple Silicon, Docker 29.8.0, Compose 5.5.1.
+- C++17·Python 3.12·Java 21·JavaScript(Node.js 22) 채점, DB, API, 프런트엔드 구현 완료. 프런트엔드 최종 저장·화면 전환 보완 진행 중.
+- `docker compose up --build -d`로 서버·실행기·웹을 구동했다. 접속 주소는 `http://localhost:8080`이며 API와 실행기는 호스트 포트를 노출하지 않는다.
+- `.env`는 예제로부터 생성했고 API 키는 비워 두었다. 개인 데이터와 로컬 도구·작업 보고서는 Git에서 제외한다.
+
+## 팀 운영
+
+- 공통 계약을 총괄이 관리하고, 운영 코드 구현 담당은 한 번에 한 명만 배정했다. 구현과 독립 검토·통합 검증을 병행했다.
+- 실제 구현: 백엔드·프런트엔드는 `gpt-5.6-sol` medium, 실행기는 `gpt-5.6-sol` high. 기존 담당자를 수정 작업에 재사용했다.
+- 독립 검토는 `gpt-5.6-sol` medium이 담당했다. 최종 별도 `gpt-6-astra` 에이전트는 세션의 에이전트 한도 때문에 추가하지 못했으며, 총괄이 실제 Docker·브라우저 통합 검증을 수행했다.
+- 최초 폴더에 계획 문서만 있어 현재 폴더에서 Git을 초기화했다. GitHub 원격 등록·푸시는 수행하지 않았다.
+
+## 구현 및 검토 결과
+
+### 백엔드
+
+- `8ec4401`: 문제·DB·작업·AI API 초기 구현, 16개 테스트 통과.
+- `45832eb`: 원문 예제·사용자 입력 검증, 엄격한 검증기 반환값, PATCH 필드 검증, 제출 코드 조회, Java 클래스·JavaScript 템플릿, 요청별 AI 클라이언트. 30개 테스트 통과.
+- `92c9898`: 테스트 변경과 생성 결과 설치의 원자적 버전 검사, 공개 예제 생성, UTC 응답 시각, 구조화 출력 계약 및 AI 프롬프트 보완. 38개 테스트, compileall, OpenAPI 내보내기 통과. 수정 범위 독립 재검토에서 추가 중요 지적 없음.
+
+### 실행기
+
+- `aae1d18`: 네 언어 실행 래퍼·격리·자원 제한 구현, 실제 Docker 테스트 37개 통과.
+- `c25fbe7`: 입력 쓰기 중에도 실행 제한 유지, 사용자 로그와 내부 결과 프레임 크기 분리, 실패 경로 이미지 정리, Java 메모리 판정 보완. 실제 Docker 테스트 44개 통과.
+- `4e8bc28`: Java가 임의로 출력한 오류 문구를 메모리 초과로 오판하지 않도록 명시적 래퍼 신호 사용. 실제 Java 회귀 테스트 2개와 관련 단위 테스트 21개 통과. 수정 범위 독립 재검토에서 추가 지적 없음.
+- 실행 컨테이너에는 네트워크·호스트 디렉터리·API 키·DB·Docker 소켓·기대 정답이 없다. 비루트·읽기 전용 파일시스템 및 CPU·메모리·프로세스·시간·출력량 제한을 적용한다.
+- 측정치는 참고용 실행 정보이며, 실제 제한은 실행 관리자와 Docker가 적용한다. 기대값 비교는 백엔드가 수행한다.
+
+### 프런트엔드와 로컬 구동
+
+- `f87acdc`: 문제 목록·이미지/텍스트 등록·문제 편집·Monaco·테스트/결과/기록·요청형 도우미 구현. 8개 테스트·타입 검사·빌드 통과.
+- `bc5d0ca`: 같은 화면 내 저장 순서, 초기 조회의 문제 식별, 도우미 실패 입력 보존, 미저장 공개 예제 처리, 공개 테스트 종류, Compose 빌드 경로 보완. 13개 테스트·타입 검사·빌드 통과.
+- `32d0ad1`: 내부 네트워크에만 연결된 웹 컨테이너에서 localhost 포트가 열리지 않는 현상을 재현한 뒤 웹 전용 브리지 네트워크 추가. 실제 `127.0.0.1:8080` 바인딩과 HTTP 200 확인.
+- 최종 검토에서 화면을 다시 열 때 저장 순서, 편집/실행/도우미 완료 응답의 문제 식별, 삭제 실패, StrictMode 저장 상태를 추가 보완 중이다.
+- 데스크톱에서 좁은 화면으로 크기를 바꿀 때 Monaco의 이전 너비가 남는 현상도 브라우저에서 재현해 수정 담당자에게 전달했다.
+
+## 총괄의 실제 통합 검증
+
+### Compose 서비스와 데이터
+
+- 최신 백엔드·실행기 컨테이너를 통한 네 언어 정답 제출 각각 5/5, 오답 실행 각각 1/3 판정 확인. 0을 반환하는 오답은 합계가 0인 공개 예제만 통과한다.
+- 실행/제출 중 AI 사용량 변화 없음. 히든 응답에서 입력·기대값·실제값·표준 출력/오류가 제외됨을 확인했다.
+- 서버를 `--force-recreate`로 재생성한 뒤 문제·공개 테스트·JavaScript 초안·8개 실행 기록이 유지됨을 확인했다. 검증 전용 데이터는 식별자로 한정해 정리했다.
+- 공개/사용자 테스트 생성 허용, 외부 히든 생성 요청 422, UTC `Z` 응답을 실제 HTTP로 확인했다.
+
+### AI 모의 응답과 실제 Docker 생성 파이프라인
+
+- 임시 DB와 AI 모의 응답을 사용하고, 생성기·검증기·기준 풀이·단순 풀이 실행은 모두 실제 Docker에서 수행했다.
+- 원문 예제 및 작은 입력 50개를 교차 검증한 뒤 공개 3개·사용자 1개·히든 28개를 설치했다. 후보 중 공개 테스트를 보충하고 중복을 제외하므로 히든 수는 목표보다 적을 수 있다.
+- JavaScript 실행 4/4, 제출 32/32 통과. 기대값 계산과 제한사항 검증도 확인했다.
+- 생성 후 실행·제출·기대값 계산에서는 추가 AI 호출이 없었다. 임시 DB는 검증 후 제거했다.
+
+### 실제 브라우저
+
+- 번들에 포함된 Monaco 에디터와 한국어 화면, 외부 CDN 요청이 없는 구성을 확인했다.
+- JavaScript 초안 자동 저장·새로고침 복원, 실행 3/3·제출 5/5, 제출 소스 조회를 확인했다.
+- 사용자 테스트 추가, 기대값 계산 후 명시적 적용, 실행 4/4, 삭제를 확인했다.
+- 직접 문제 등록·공개 예제 추가/편집·미저장 예제의 생성 차단을 확인했다.
+- API 키가 없는 분석·생성·도우미 요청의 503 안내와 입력 보존, 전체 정답 요청의 명시적 선택을 확인했다. 실제 유료 API는 호출하지 않았다.
+- 좁은 화면의 최초 로드는 정상이며, 데스크톱에서 축소할 때 발생하는 너비 문제는 최종 수정 후 재검증한다.
+
+## 미검증 범위
+
+- 실제 OpenAI API 응답의 품질·지연·과금. 모의 응답과 실패 처리는 검증했다.
+- Windows 실기기. Docker Desktop Linux 컨테이너용 설정과 PowerShell 안내를 제공한다.
+- 원본 코딩 사이트의 공식 채점과 동일한 판정/점수. 이 앱의 생성된 테스트 통과만 의미한다.
+
+상세 로컬 로그와 화면 캡처는 Git에서 제외한 `docs/work/`에 보관한다.

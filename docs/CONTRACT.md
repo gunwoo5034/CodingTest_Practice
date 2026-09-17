@@ -59,3 +59,7 @@ Professional dark navy workspace, restrained mint accent, legible Korean system 
 ## Acceptance
 
 pytest meaningful backend and runner tests; generated wrappers tested on original fixtures, Docker integration tests opt-in. Frontend typecheck/build, Vitest behavior tests, browser smoke via Playwright if available. Real Docker and Windows validation may be unavailable; disclose separately, never use unsafe host fallback to make tests pass. Live OpenAI calls are not required for automated tests.
+
+## Integration clarification: manually entered public examples
+
+`TestCaseCreate` adds optional `kind: "public" | "user"` (default `"user"`). The existing test-create route accepts only these visible kinds. Problem setup uses `"public"` to register original examples after manual entry; the workspace custom-case editor omits it or uses `"user"`. Hidden test creation stays internal to validated generation. All visible writes share constraint validation, generation edit locks, and revision semantics.

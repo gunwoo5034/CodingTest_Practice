@@ -25,6 +25,12 @@ docker compose up --build -d
 
 브라우저에서 <http://localhost:8080>을 엽니다. 최초 빌드에는 언어별 실행 이미지 준비 시간이 포함됩니다.
 
+실행 중에 `.env`의 API 키나 모델을 바꿨다면 다음 명령으로 서버 설정을 다시 적용합니다.
+
+```sh
+docker compose up -d --no-deps --force-recreate server
+```
+
 macOS에서 `docker: command not found`가 나오면 현재 터미널에서 다음을 실행한 뒤 다시 시도합니다.
 
 ```sh
@@ -82,6 +88,12 @@ uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
 프런트엔드는 `web` 폴더에서 `npm ci`, `npm run dev`로 실행합니다. API 명세는 `/openapi.json`과 `docs/openapi.json`에서 확인합니다.
 
 API 키와 문제 이미지·원문·개인 DB·제출 기록은 저장소에 커밋하지 않습니다. `.env`는 백엔드 설정이며 프런트엔드나 채점 컨테이너에 전달하지 않습니다.
+
+## 검증 범위
+
+2026-09-17 기준 macOS Apple Silicon의 Docker Desktop에서 네 언어의 정답·오답 판정, 실행 제한, 히든 결과 비공개, 서버 재생성 후 DB 보존을 확인했습니다. 테스트 생성 파이프라인은 AI 모의 응답과 실제 Docker 실행을 연결해 검증했습니다.
+
+실제 OpenAI API 호출과 Windows 실기기 실행은 아직 검증하지 않았습니다. Windows용 설정은 Docker Desktop의 Linux 컨테이너를 기준으로 제공합니다.
 
 ## 프로젝트 문서
 
