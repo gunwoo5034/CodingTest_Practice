@@ -100,10 +100,12 @@ services:
       - "127.0.0.1:8080:80"
     networks:
       - app
+      - frontend
 
 networks:
   app:
     internal: true
+  frontend:
   egress:
 
 volumes:
