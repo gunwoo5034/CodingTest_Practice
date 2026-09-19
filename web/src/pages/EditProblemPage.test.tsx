@@ -4,15 +4,15 @@ import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditProblemPage } from './EditProblemPage';
 
-const mocks = vi.hoisted(() => ({ problem: vi.fn(), updateProblem: vi.fn(), updateTest: vi.fn(), createTest: vi.fn(), deleteTest: vi.fn(), generate: vi.fn(), generationJob: vi.fn() }));
+const mocks = vi.hoisted(() => ({ problem: vi.fn(), folders: vi.fn(), moveProblem: vi.fn(), updateProblem: vi.fn(), updateTest: vi.fn(), createTest: vi.fn(), deleteTest: vi.fn(), generate: vi.fn(), generationJob: vi.fn() }));
 vi.mock('../api/client', async (load) => ({ ...(await load<typeof import('../api/client')>()), api: mocks }));
-const problem = { id: 'p1', title: '합계', status: 'analyzed' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: '설명', example_explanation: '기존 예제 설명', constraints: ['n > 0'], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: '' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [{ id: 't1', kind: 'public' as const, position: 0, args: [1], expected: 1, suite_version: 1 }], output_format: null, is_solved: false };
+const problem = { id: 'p1', title: '합계', status: 'analyzed' as const, test_revision: 1, updated_at: '2026-01-01T00:00:00Z', statement: '설명', example_explanation: '기존 예제 설명', constraints: ['n > 0'], signature: { parameters: [{ name: 'n', type: { base: 'int' as const, dimensions: 0 as const } }], return_type: { base: 'int' as const, dimensions: 0 as const } }, templates: { python: '' }, time_limit_ms: 2000, memory_limit_mb: 256, tests: [{ id: 't1', kind: 'public' as const, position: 0, args: [1], expected: 1, suite_version: 1 }], output_format: null, is_solved: false, folder_id: null };
 const problemFor = (id: string) => ({ ...problem, id, title: `문제 ${id.toUpperCase()}`, tests: problem.tests.map((test) => ({ ...test, id: `${id}-test` })) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 const renderPage = () => render(<MemoryRouter initialEntries={['/problems/p1/edit']}><Routes><Route path="/problems/:id/edit" element={<EditProblemPage />} /></Routes></MemoryRouter>);
 
 describe('EditProblemPage examples', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.problem.mockResolvedValue(problem); mocks.updateProblem.mockResolvedValue(problem); mocks.createTest.mockResolvedValue(problem.tests[0]); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.problem.mockResolvedValue(problem); mocks.folders.mockResolvedValue([{ id: 'algo', name: '알고리즘', problem_count: 0 }]); mocks.updateProblem.mockResolvedValue(problem); mocks.createTest.mockResolvedValue(problem.tests[0]); });
   it('blocks generation while a visible example has unsaved edits', async () => {
     renderPage();
     const args = await screen.findByLabelText('args');
@@ -69,6 +69,17 @@ describe('EditProblemPage examples', () => {
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
     await waitFor(() => expect(mocks.updateProblem).toHaveBeenCalledWith('p1', expect.objectContaining({ example_explanation: '수정한 **설명**' })));
     expect(screen.getByLabelText(/입출력 예 설명/)).toHaveValue('수정한 **설명**');
+  });
+
+  it('moves folders without replacing unsaved problem fields', async () => {
+    mocks.moveProblem.mockResolvedValue({ ...problem, folder_id: 'algo' });
+    renderPage();
+    const title = await screen.findByDisplayValue('합계');
+    fireEvent.change(title, { target: { value: '아직 저장하지 않은 제목' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '문제 폴더' }), { target: { value: 'algo' } });
+    await waitFor(() => expect(mocks.moveProblem).toHaveBeenCalledWith('p1', 'algo'));
+    expect(screen.getByDisplayValue('아직 저장하지 않은 제목')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '문제 폴더' })).toHaveValue('algo');
   });
 
   it('explains the possible format-repair call without implying expected values change', async () => {

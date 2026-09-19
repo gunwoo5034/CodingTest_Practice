@@ -7,32 +7,34 @@ import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import { App } from './App';
 import './styles.css';
-import './styles-fixes.css';
-import './mobile.css';
 
 self.MonacoEnvironment = {
   getWorker(_: string, label: string) { return label === 'typescript' || label === 'javascript' ? new tsWorker() : new editorWorker(); },
 };
 
 loader.config({ monaco });
-monaco.editor.defineTheme('loopcode-dark', {
-  base: 'vs-dark',
+monaco.editor.defineTheme('loopcode-light', {
+  base: 'vs',
   inherit: true,
   rules: [
-    { token: 'comment', foreground: '71869D', fontStyle: 'italic' },
-    { token: 'keyword', foreground: '78E7C5' },
-    { token: 'string', foreground: 'E8CF8D' },
-    { token: 'number', foreground: '9FC5FF' },
+    { token: 'comment', foreground: '6E7781', fontStyle: 'italic' },
+    { token: 'keyword', foreground: '0066CC' },
+    { token: 'string', foreground: '0A7A3D' },
+    { token: 'number', foreground: '9A3E00' },
   ],
   colors: {
-    'editor.background': '#07111E',
-    'editor.foreground': '#DCE6F1',
-    'editorLineNumber.foreground': '#41566D',
-    'editorLineNumber.activeForeground': '#8CA0B7',
-    'editorCursor.foreground': '#5EE6BD',
-    'editor.selectionBackground': '#214B56',
-    'editor.inactiveSelectionBackground': '#173540',
-    'editorIndentGuide.background1': '#15283B',
+    'editor.background': '#FFFFFF',
+    'editor.foreground': '#1D1D1F',
+    'editorLineNumber.foreground': '#A1A1A6',
+    'editorLineNumber.activeForeground': '#515154',
+    'editorCursor.foreground': '#0066CC',
+    'editor.selectionBackground': '#BBDDFB',
+    'editor.inactiveSelectionBackground': '#E1EFFB',
+    'editorIndentGuide.background1': '#E5E5EA',
+    'editorIndentGuide.activeBackground1': '#C7C7CC',
+    'editorGutter.background': '#FFFFFF',
+    'editorWidget.background': '#FFFFFF',
+    'editorWidget.border': '#D2D2D7',
   },
 });
 

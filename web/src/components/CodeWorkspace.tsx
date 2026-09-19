@@ -112,7 +112,7 @@ export function CodeWorkspace(props: Props) {
     </header>
     <Editor
       height="100%" language={current.monaco} value={source} onChange={edit}
-      theme="loopcode-dark" options={{ readOnly: switching, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, padding: { top: 18 }, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2, roundedSelection: false }}
+      theme="loopcode-light" options={{ readOnly: switching, minimap: { enabled: false }, fontSize: 14, lineHeight: 23, padding: { top: 18 }, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2, roundedSelection: false }}
     />
   </section>;
 }

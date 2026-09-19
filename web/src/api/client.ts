@@ -3,6 +3,7 @@ import { formatApiError } from '../lib/domain';
 
 export type Problem = components['schemas']['ProblemPublic'];
 export type ProblemSummary = components['schemas']['ProblemSummary'];
+export type Folder = components['schemas']['FolderPublic'];
 export type Health = components['schemas']['HealthPublic'];
 export type Draft = components['schemas']['DraftPublic'];
 export type Job = components['schemas']['JobPublic'];
@@ -31,12 +32,17 @@ const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 
 export const api = {
   health: () => request<Health>('/api/health'),
+  folders: () => request<Folder[]>('/api/folders'),
+  createFolder: (name: string) => request<Folder>('/api/folders', { method: 'POST', ...json({ name }) }),
+  updateFolder: (id: string, name: string) => request<Folder>(`/api/folders/${id}`, { method: 'PATCH', ...json({ name }) }),
+  deleteFolder: (id: string) => request<void>(`/api/folders/${id}`, { method: 'DELETE' }),
   problems: () => request<ProblemSummary[]>('/api/problems'),
   problem: (id: string) => request<Problem>(`/api/problems/${id}`),
   createProblem: (body: components['schemas']['ProblemCreate']) => request<Problem>('/api/problems', { method: 'POST', ...json(body) }),
   analyze: (body: components['schemas']['AnalyzeRequest']) => request<Problem>('/api/problems/analyze', { method: 'POST', ...json(body) }),
   updateProblem: (id: string, body: components['schemas']['ProblemUpdate']) => request<Problem>(`/api/problems/${id}`, { method: 'PATCH', ...json(body) }),
   deleteProblem: (id: string) => request<void>(`/api/problems/${id}`, { method: 'DELETE' }),
+  moveProblem: (id: string, folderId: string | null) => request<Problem>(`/api/problems/${id}/folder`, { method: 'PUT', ...json({ folder_id: folderId }) }),
   createTest: (id: string, body: components['schemas']['TestCaseCreate']) => request<TestCase>(`/api/problems/${id}/tests`, { method: 'POST', ...json(body) }),
   updateTest: (id: string, testId: string, body: components['schemas']['TestCaseUpdate']) => request<TestCase>(`/api/problems/${id}/tests/${testId}`, { method: 'PATCH', ...json(body) }),
   deleteTest: (id: string, testId: string) => request<void>(`/api/problems/${id}/tests/${testId}`, { method: 'DELETE' }),
