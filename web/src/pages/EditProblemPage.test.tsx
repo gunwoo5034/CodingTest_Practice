@@ -82,6 +82,17 @@ describe('EditProblemPage examples', () => {
     expect(screen.getByRole('combobox', { name: '문제 폴더' })).toHaveValue('algo');
   });
 
+  it('keeps a late folder list when a save starts after the problem loads', async () => {
+    const folderLoad = deferred<Array<{ id: string; name: string; problem_count: number }>>();
+    mocks.folders.mockReturnValue(folderLoad.promise);
+    renderPage();
+    await screen.findByDisplayValue('합계');
+    fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+    await waitFor(() => expect(mocks.updateProblem).toHaveBeenCalled());
+    folderLoad.resolve([{ id: 'algo', name: '알고리즘', problem_count: 0 }]);
+    expect(await screen.findByRole('option', { name: '알고리즘' })).toBeInTheDocument();
+  });
+
   it('explains the possible format-repair call without implying expected values change', async () => {
     renderPage();
     expect(await screen.findByText('반환 형식이 맞지 않으면 AI 보정 요청이 최대 1회 추가됩니다. 기대값은 유지됩니다.')).toBeInTheDocument();

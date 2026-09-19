@@ -12,10 +12,10 @@ export function AppShell() {
     <aside className="global-nav">
       <NavLink to="/" className="brand" aria-label="LoopCode 홈"><span>LC</span><strong>LoopCode</strong></NavLink>
       <nav aria-label="주 메뉴">
-        <NavLink to="/" end><BookOpen /><span>문제</span></NavLink>
-        <NavLink to="/problems/new"><Plus /><span>등록</span></NavLink>
+        <NavLink to="/" end aria-label="문제 목록"><BookOpen /><span>문제</span></NavLink>
+        <NavLink to="/problems/new" aria-label="문제 등록"><Plus /><span>등록</span></NavLink>
       </nav>
-      <button className="nav-button" onClick={() => setOpen(true)}><Settings /><span>상태</span><i className={healthy ? 'dot ok' : 'dot warn'} /></button>
+      <button className="nav-button" aria-label="서비스 상태" onClick={() => setOpen(true)}><Settings /><span>상태</span><i className={healthy ? 'dot ok' : 'dot warn'} /></button>
     </aside>
     <main className="app-main"><Outlet /></main>
     {open && <div className="drawer-backdrop" onMouseDown={() => setOpen(false)}>

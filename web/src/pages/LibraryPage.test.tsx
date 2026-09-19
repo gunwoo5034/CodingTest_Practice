@@ -52,6 +52,19 @@ describe('LibraryPage folders', () => {
     expect(opener).toHaveFocus();
   });
 
+  it('focuses a control in the delete dialog and restores the live folder menu button', async () => {
+    const user = userEvent.setup(); render(<MemoryRouter><LibraryPage /></MemoryRouter>);
+    await screen.findByRole('heading', { name: '완료한 문제' });
+    const opener = screen.getByRole('button', { name: '알고리즘 폴더 관리' });
+    await user.click(opener);
+    await user.click(screen.getByRole('button', { name: '삭제' }));
+    const dialog = screen.getByRole('dialog');
+    expect(screen.getByRole('button', { name: '폴더 창 닫기' })).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
   it('renames and deletes a folder while explaining that its problems stay', async () => {
     mocks.updateFolder.mockResolvedValue({ id: 'algo', name: '동적 계획법', problem_count: 1 });
     mocks.deleteFolder.mockResolvedValue(undefined);
@@ -72,6 +85,8 @@ describe('LibraryPage folders', () => {
     expect(screen.getByText(/문제는 삭제되지 않고 미분류로 이동합니다/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '폴더 삭제' }));
     await waitFor(() => expect(mocks.deleteFolder).toHaveBeenCalledWith('algo'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '폴더 추가' })).toHaveFocus();
   });
 
   it('moves a problem using the card folder selector', async () => {
