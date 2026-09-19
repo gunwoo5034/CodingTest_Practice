@@ -234,7 +234,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .signature-card code { border-radius: 5px; padding: 4px 7px; background: var(--blue-soft); color: var(--blue); }
 .resize-handle { position: relative; background: var(--line); cursor: col-resize; }
 .resize-handle:hover, .resize-handle:active { background: var(--blue); }
-.right-workspace { min-width: 0; background: var(--canvas); display: grid; grid-template-rows: minmax(280px, 1fr) auto; }
+.right-workspace { min-width: 0; background: var(--canvas); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(280px, 1fr) auto; }
 .editor-slot, .code-workspace, .code-workspace > div, .code-workspace > section, .pane-toolbar { min-width: 0; }
 .editor-slot { min-height: 0; }
 .code-workspace { width: 100%; height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 58px minmax(0, 1fr); }
