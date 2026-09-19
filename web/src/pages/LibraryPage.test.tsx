@@ -27,6 +27,24 @@ describe('LibraryPage folders', () => {
     expect(screen.getByTitle('전체 통과한 제출 기록이 있습니다.')).toHaveTextContent('풀이 완료');
   });
 
+  it('intersects the unsolved filter with the selected folder and search text', async () => {
+    mocks.problems.mockResolvedValue([
+      { ...summaries[0], title: '배열 합' },
+      { ...summaries[1], id: 'target', title: '배열 찾기', folder_id: 'algo' },
+      { ...summaries[1], id: 'other-folder', title: '배열 정렬', folder_id: 'data' },
+      { ...summaries[1], id: 'other-query', title: '그래프 탐색', folder_id: 'algo' },
+    ]);
+    render(<MemoryRouter><LibraryPage /></MemoryRouter>);
+    await screen.findByRole('heading', { name: '배열 찾기' });
+    fireEvent.click(screen.getByRole('button', { name: '알고리즘 1' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '문제 검색' }), { target: { value: '배열' } });
+    fireEvent.click(screen.getByRole('button', { name: '미완료' }));
+    expect(screen.getByRole('heading', { name: '배열 찾기' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '배열 합' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '배열 정렬' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '그래프 탐색' })).not.toBeInTheDocument();
+  });
+
   it('keeps a folder name editable when creation fails', async () => {
     mocks.createFolder.mockRejectedValue(new Error('같은 이름의 폴더가 있습니다.'));
     const user = userEvent.setup(); render(<MemoryRouter><LibraryPage /></MemoryRouter>);

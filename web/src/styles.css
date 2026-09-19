@@ -276,6 +276,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .result-summary.failed { background: var(--red-soft); color: var(--red); }
 .result-summary strong { font-size: 13px; }
 .result-summary p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+.result-completion-link { width: fit-content; margin-bottom: 10px; }
 .result-row { margin-bottom: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); }
 .result-row summary { min-height: 39px; padding: 6px 10px; cursor: pointer; list-style: none; display: flex; align-items: center; gap: 9px; font-size: 11px; }
 .result-row summary svg { width: 15px; }
@@ -350,7 +351,7 @@ textarea { resize: vertical; line-height: 1.55; }
   .folder-row { grid-template-columns: minmax(0, 1fr) 36px; }
   .folder-menu { left: 0; right: auto; }
   .library-toolbar { align-items: stretch; flex-direction: column; }
-  .filter-pills { overflow-x: auto; padding-bottom: 3px; }
+  .filter-pills { min-width: 0; max-width: 100%; overflow-x: auto; padding-bottom: 3px; }
   .import-layout { grid-template-columns: 1fr; }
   .workspace-page { height: auto; min-height: calc(100vh - 44px); overflow: visible; }
   .workspace-header { min-height: 64px; padding: 10px 12px; align-items: flex-start; }

@@ -132,6 +132,34 @@ describe('WorkspacePage route identity', () => {
     expect(mocks.problem).toHaveBeenCalledTimes(2);
   });
 
+  it('offers a main-page link only after a successful non-empty submission', async () => {
+    mocks.problem.mockResolvedValue(makeProblem('a', '완료 이동 문제'));
+    mocks.startJob.mockImplementation((_id: string, body: { mode: 'run' | 'submit' }) => Promise.resolve({ id: `${body.mode}-job`, status: 'queued', mode: body.mode, language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' }));
+    mocks.job.mockImplementation((jobId: string) => Promise.resolve({ id: jobId, status: 'completed', mode: jobId.startsWith('submit') ? 'submit' : 'run', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: true, passed: 1, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] }));
+    const router = createMemoryRouter([{ path: '/', element: <div>메인 화면</div> }, { path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '완료 이동 문제' });
+    await mocks.workspaceRuns.get('a')!('python', 'run source');
+    expect(screen.queryByRole('link', { name: '메인으로 돌아가기' })).not.toBeInTheDocument();
+    await mocks.workspaceSubmits.get('a')!('python', 'submit source');
+    const back = await screen.findByRole('link', { name: '메인으로 돌아가기' });
+    expect(back).toHaveAttribute('href', '/');
+    fireEvent.click(back);
+    expect(await screen.findByText('메인 화면')).toBeInTheDocument();
+  });
+
+  it('does not offer completion navigation after an incorrect submission', async () => {
+    mocks.problem.mockResolvedValue(makeProblem('a', '오답 문제'));
+    mocks.startJob.mockResolvedValue({ id: 'submit-job', status: 'queued', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z' });
+    mocks.job.mockResolvedValue({ id: 'submit-job', status: 'completed', mode: 'submit', language: 'python', source: '', test_revision: 1, created_at: '2026-01-01T00:00:00Z', summary: { all_passed: false, passed: 0, total: 1, max_time_ms: 1, max_memory_kb: 1 }, results: [] });
+    const router = createMemoryRouter([{ path: '/problems/:id', element: <WorkspacePage /> }], { initialEntries: ['/problems/a'] });
+    render(<RouterProvider router={router} />);
+    await screen.findByRole('heading', { name: '오답 문제' });
+    await mocks.workspaceSubmits.get('a')!('python', 'submit source');
+    expect(await screen.findByText('0 / 1 테스트 통과')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '메인으로 돌아가기' })).not.toBeInTheDocument();
+  });
+
   it('keeps a solved refresh when submission history refresh fails', async () => {
     mocks.problem.mockResolvedValueOnce(makeProblem('a', '제출 문제')).mockResolvedValueOnce({ ...makeProblem('a', '제출 문제'), is_solved: true });
     mocks.submissions.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('제출 기록을 불러오지 못했습니다'));
