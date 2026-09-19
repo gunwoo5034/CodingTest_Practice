@@ -20,11 +20,23 @@ class Base(DeclarativeBase):
     pass
 
 
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(60))
+    name_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Problem(Base):
     __tablename__ = "problems"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     title: Mapped[str] = mapped_column(String(200))
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     statement: Mapped[str] = mapped_column(Text, default="")
     example_explanation: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
     constraints: Mapped[list[str]] = mapped_column(JSON, default=list)

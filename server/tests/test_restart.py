@@ -75,7 +75,11 @@ def test_initialize_migrates_legacy_problem_without_losing_related_data(tmp_path
     problem_table = Table(
         "problems",
         legacy,
-        *(column._copy() for column in Problem.__table__.columns if column.name != "example_explanation"),
+        *(
+            column._copy()
+            for column in Problem.__table__.columns
+            if column.name not in {"example_explanation", "folder_id"}
+        ),
     )
     test_table = DBTestCase.__table__.to_metadata(legacy)
     draft_table = CodeDraft.__table__.to_metadata(legacy)
@@ -122,9 +126,17 @@ def test_initialize_migrates_legacy_problem_without_losing_related_data(tmp_path
 
     initialize_database(engine, factory)
     initialize_database(engine, factory)
+    with engine.connect() as connection:
+        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(problems)")}
+        indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(problems)")}
+        folder_fks = [row for row in connection.exec_driver_sql("PRAGMA foreign_key_list(problems)") if row[3] == "folder_id"]
+        assert "folder_id" in columns
+        assert "ix_problems_folder_id" in indexes
+        assert folder_fks and folder_fks[0][2] == "folders" and folder_fks[0][6].upper() == "SET NULL"
     with factory() as db:
         problem = db.get(Problem, "legacy-problem")
         assert problem.example_explanation == ""
+        assert problem.folder_id is None
         assert problem.statement == "기존 설명"
         assert db.get(DBTestCase, "legacy-test").expected == 1
         assert db.get(CodeDraft, "legacy-draft").source.endswith("return value")

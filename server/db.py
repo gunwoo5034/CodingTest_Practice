@@ -71,6 +71,13 @@ def _migrate_sqlite(engine) -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE problems ADD COLUMN example_explanation TEXT NOT NULL DEFAULT ''"
             )
+        if "folder_id" not in columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE problems ADD COLUMN folder_id VARCHAR(36) REFERENCES folders(id) ON DELETE SET NULL"
+            )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_problems_folder_id ON problems (folder_id)"
+        )
 
 
 def _upgrade_templates(db: Session) -> None:

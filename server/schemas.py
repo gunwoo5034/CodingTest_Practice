@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 
@@ -60,6 +60,25 @@ class TestCasePublic(BaseModel):
     suite_version: int
 
 
+class FolderWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class FolderPublic(BaseModel):
+    id: str
+    name: str
+    problem_count: int = Field(ge=0)
+
+
+class FolderAssignment(BaseModel):
+    folder_id: str | None
+
+
 class ProblemSummary(BaseModel):
     id: str
     title: str
@@ -67,6 +86,7 @@ class ProblemSummary(BaseModel):
     test_revision: int
     updated_at: UTCDateTime
     is_solved: bool = False
+    folder_id: str | None = None
 
 
 class ProblemPublic(ProblemSummary):
@@ -90,6 +110,7 @@ class ProblemCreate(BaseModel):
     constraints: list[str] = Field(default_factory=list, max_length=100)
     signature: Signature
     source_text: str | None = Field(default=None, max_length=100_000)
+    folder_id: str | None = None
 
 
 class ProblemUpdate(BaseModel):
@@ -195,6 +216,7 @@ class AnalyzeRequest(BaseModel):
     text: str | None = Field(default=None, max_length=100_000)
     image_base64: str | None = Field(default=None, max_length=14_000_000)
     image_mime: Literal["image/png", "image/jpeg", "image/webp"] | None = None
+    folder_id: str | None = None
 
     @model_validator(mode="after")
     def has_input(self):

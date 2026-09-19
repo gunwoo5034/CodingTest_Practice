@@ -9,12 +9,13 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.ai_client import AIUnavailable, OpenAIClient
 from server.config import Settings, get_settings
 from server.db import create_database, initialize_database, session_dependency
-from server.models import AIUsage, ChatTurn, CodeDraft, Job, Problem, TestCase, now
+from server.models import AIUsage, ChatTurn, CodeDraft, Folder, Job, Problem, TestCase, now
 from server.runner_client import RunnerClient, RunnerUnavailable
 from server.schemas import (
     AIUsagePublic,
@@ -24,6 +25,9 @@ from server.schemas import (
     DraftWrite,
     ExpectedCompute,
     ExpectedResult,
+    FolderAssignment,
+    FolderPublic,
+    FolderWrite,
     GenerationJobPublic,
     HealthPublic,
     JobCreate,
@@ -52,6 +56,22 @@ def _problem_or_404(db: Session, problem_id: str) -> Problem:
     if not problem:
         raise HTTPException(404, "문제를 찾을 수 없습니다.")
     return problem
+
+
+def _folder_or_404(db: Session, folder_id: str) -> Folder:
+    folder = db.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(404, "폴더를 찾을 수 없습니다.")
+    return folder
+
+
+def _folder_public(db: Session, folder: Folder) -> FolderPublic:
+    count = db.scalar(select(func.count(Problem.id)).where(Problem.folder_id == folder.id)) or 0
+    return FolderPublic(id=folder.id, name=folder.name, problem_count=count)
+
+
+def _folder_conflict() -> HTTPException:
+    return HTTPException(409, "같은 이름의 폴더가 이미 있습니다.")
 
 
 def _ensure_editable(problem: Problem) -> None:
@@ -98,6 +118,7 @@ def _problem_summary(problem: Problem, *, is_solved: bool = False) -> ProblemSum
         test_revision=problem.test_revision,
         updated_at=problem.updated_at,
         is_solved=is_solved,
+        folder_id=problem.folder_id,
     )
 
 
@@ -266,11 +287,65 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
         solved = _solved_problem_ids(db, [item.id for item in problems])
         return [_problem_summary(item, is_solved=item.id in solved) for item in problems]
 
+    @app.get("/api/folders", response_model=list[FolderPublic], tags=["folders"])
+    def list_folders(db: Session = Depends(get_db)):
+        rows = db.execute(
+            select(Folder, func.count(Problem.id))
+            .outerjoin(Problem, Problem.folder_id == Folder.id)
+            .group_by(Folder.id)
+            .order_by(Folder.name_key, Folder.id)
+        ).all()
+        return [FolderPublic(id=folder.id, name=folder.name, problem_count=count) for folder, count in rows]
+
+    @app.post("/api/folders", response_model=FolderPublic, status_code=201, tags=["folders"])
+    def create_folder(payload: FolderWrite, db: Session = Depends(get_db)):
+        name_key = payload.name.casefold()
+        if db.scalar(select(Folder.id).where(Folder.name_key == name_key)):
+            raise _folder_conflict()
+        folder = Folder(name=payload.name, name_key=name_key)
+        db.add(folder)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise _folder_conflict() from exc
+        db.refresh(folder)
+        return FolderPublic(id=folder.id, name=folder.name, problem_count=0)
+
+    @app.patch("/api/folders/{folder_id}", response_model=FolderPublic, tags=["folders"])
+    def update_folder(folder_id: str, payload: FolderWrite, db: Session = Depends(get_db)):
+        folder = _folder_or_404(db, folder_id)
+        name_key = payload.name.casefold()
+        duplicate = db.scalar(
+            select(Folder.id).where(Folder.name_key == name_key, Folder.id != folder.id)
+        )
+        if duplicate:
+            raise _folder_conflict()
+        folder.name = payload.name
+        folder.name_key = name_key
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise _folder_conflict() from exc
+        db.refresh(folder)
+        return _folder_public(db, folder)
+
+    @app.delete("/api/folders/{folder_id}", status_code=204, tags=["folders"])
+    def delete_folder(folder_id: str, db: Session = Depends(get_db)):
+        folder = _folder_or_404(db, folder_id)
+        db.delete(folder)
+        db.commit()
+        return Response(status_code=204)
+
     @app.post("/api/problems", response_model=ProblemPublic, status_code=201, tags=["problems"])
     def create_problem(payload: ProblemCreate, db: Session = Depends(get_db)):
+        if payload.folder_id is not None:
+            _folder_or_404(db, payload.folder_id)
         signature = payload.signature
         problem = Problem(
             title=payload.title,
+            folder_id=payload.folder_id,
             statement=payload.statement,
             example_explanation=payload.example_explanation,
             constraints=payload.constraints,
@@ -288,6 +363,9 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
     async def analyze_new_problem(payload: AnalyzeRequest, db: Session = Depends(get_db)):
         if not settings.openai_api_key:
             raise HTTPException(503, "OPENAI_API_KEY를 설정한 뒤 다시 시도하세요.")
+        if payload.folder_id is not None:
+            _folder_or_404(db, payload.folder_id)
+            db.commit()
         image = None
         if payload.image_base64:
             try:
@@ -314,32 +392,66 @@ def create_app(*, settings: Settings | None = None, runner=None, ai=None) -> Fas
             raise HTTPException(503, str(exc)) from exc
         except (ValueError, TypeError, json.JSONDecodeError, DomainValidationError) as exc:
             raise HTTPException(422, "AI 분석 결과의 타입 또는 예제가 올바르지 않습니다.") from exc
-        problem = Problem(
-            title=result["title"],
-            statement=result["statement"],
-            example_explanation=example_explanation,
-            constraints=result["constraints"],
-            signature=signature.model_dump(),
-            templates=templates_for(signature),
-            source_text=payload.text,
-            source_image=image,
-            source_image_mime=payload.image_mime,
-            status="analyzed",
-            original_examples=[{"args": example.args, "expected": example.expected} for example in parsed_examples],
-        )
-        db.add(problem)
-        db.flush()
-        for position, example in enumerate(parsed_examples):
-            db.add(TestCase(problem_id=problem.id, kind="public", position=position, args=example.args, expected=example.expected, suite_version=1, provenance={"source": "analysis"}))
-        db.add(AIUsage(problem_id=problem.id, operation="analyze", model=result["model"], input_tokens=result["input_tokens"], output_tokens=result["output_tokens"]))
-        db.commit()
-        db.refresh(problem)
+        db.expire_all()
+        folder_id = payload.folder_id
+        if folder_id is not None and db.get(Folder, folder_id) is None:
+            folder_id = None
+
+        def persist_analyzed_problem(selected_folder_id: str | None) -> Problem:
+            saved = Problem(
+                title=result["title"],
+                folder_id=selected_folder_id,
+                statement=result["statement"],
+                example_explanation=example_explanation,
+                constraints=result["constraints"],
+                signature=signature.model_dump(),
+                templates=templates_for(signature),
+                source_text=payload.text,
+                source_image=image,
+                source_image_mime=payload.image_mime,
+                status="analyzed",
+                original_examples=[{"args": example.args, "expected": example.expected} for example in parsed_examples],
+            )
+            db.add(saved)
+            db.flush()
+            for position, example in enumerate(parsed_examples):
+                db.add(TestCase(problem_id=saved.id, kind="public", position=position, args=example.args, expected=example.expected, suite_version=1, provenance={"source": "analysis"}))
+            db.add(AIUsage(problem_id=saved.id, operation="analyze", model=result["model"], input_tokens=result["input_tokens"], output_tokens=result["output_tokens"]))
+            db.commit()
+            db.refresh(saved)
+            return saved
+
+        try:
+            problem = persist_analyzed_problem(folder_id)
+        except IntegrityError as exc:
+            db.rollback()
+            if folder_id is None or db.get(Folder, folder_id) is not None:
+                raise HTTPException(409, "폴더 분류 중 충돌이 발생했습니다. 다시 시도하세요.") from exc
+            problem = persist_analyzed_problem(None)
         return _problem_public(problem)
 
     @app.get("/api/problems/{problem_id}", response_model=ProblemPublic, tags=["problems"])
     def get_problem(problem_id: str, db: Session = Depends(get_db)):
         problem = _problem_or_404(db, problem_id)
         return _problem_public(problem, is_solved=problem.id in _solved_problem_ids(db, [problem.id]))
+
+    @app.put("/api/problems/{problem_id}/folder", response_model=ProblemPublic, tags=["folders"])
+    def move_problem_to_folder(
+        problem_id: str, payload: FolderAssignment, db: Session = Depends(get_db)
+    ):
+        problem = _problem_or_404(db, problem_id)
+        if payload.folder_id is not None:
+            _folder_or_404(db, payload.folder_id)
+        problem.folder_id = payload.folder_id
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(404, "폴더를 찾을 수 없습니다.") from exc
+        db.refresh(problem)
+        return _problem_public(
+            problem, is_solved=problem.id in _solved_problem_ids(db, [problem.id])
+        )
 
     @app.patch("/api/problems/{problem_id}", response_model=ProblemPublic, tags=["problems"])
     def update_problem(problem_id: str, payload: ProblemUpdate, db: Session = Depends(get_db)):
